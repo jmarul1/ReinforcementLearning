@@ -1,0 +1,5 @@
+# repo
+repo="/c/Users/jmarulan/OneDrive - Intel Corporation/Documents/Code/github/market"
+# proxy
+pproxy='http://proxy-chain.intel.com:911'
+alias aka='source "$repo/.aliases"'
