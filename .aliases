@@ -1,5 +1,9 @@
 # repo
-repo="/c/Users/jmarulan/OneDrive - Intel Corporation/Documents/Code/github/market"
+repo="/c/Code_Repository/github/market"
+
 # proxy
 pproxy='http://proxy-chain.intel.com:911'
+
+# shortcut
 alias aka='source "$repo/.aliases"'
+alias lt='ls -ltr'
