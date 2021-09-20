@@ -3,7 +3,15 @@ repo="/c/Code_Repository/github/market"
 
 # proxy
 pproxy='http://proxy-chain.intel.com:911'
+set http_proxy=$pproxy
+set https_proxy=$pproxy
+export http_proxy
+export https_proxy
+
+# commands
+alias tree='find . -print | sed -e "s;[^/]*/;|____;g;s;____|; |;g"'
+alias lt='ls -ltr'
+alias rehash='hash -r'
 
 # shortcut
 alias aka='source "$repo/.aliases"'
-alias lt='ls -ltr'
