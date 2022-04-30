@@ -8,7 +8,7 @@ bin-release/
 .settings
 .vscode
 __pycache__
-venv
+venv*
 *.egg-info
 
 # Executables

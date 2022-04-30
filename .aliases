@@ -3,8 +3,8 @@ repo="/c/Code_Repository/github/market"
 
 # proxy
 pproxy='http://proxy-chain.intel.com:911'
-set http_proxy=$pproxy
-set https_proxy=$pproxy
+http_proxy=$pproxy
+https_proxy=$pproxy
 export http_proxy
 export https_proxy
 
