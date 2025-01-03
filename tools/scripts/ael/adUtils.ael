@@ -1,0 +1,14 @@
+defun adGetCenterBox(box)
+{
+  decl x = (db_get_bbox_x1(box) + db_get_bbox_x2(box))/2;
+  decl y = (db_get_bbox_y1(box) + db_get_bbox_y2(box))/2;
+  return list(x/1000.0,y/1000.0); // values are in nano, converted to um
+}
+
+defun adGetCenterBottomBox(box)
+{
+  decl x = (db_get_bbox_x1(box) + db_get_bbox_x2(box))/2;
+  decl y = db_get_bbox_y1(box);
+  return list(x/1000.0,y/1000.0); // values are in nano, converted to um
+}
+

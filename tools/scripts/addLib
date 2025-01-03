@@ -1,0 +1,26 @@
+#!/usr/bin/env python3.7.4
+
+def chk(path):
+  import os
+  if os.path.isdir(path): return os.path.realpath(path)
+  else: raise IOError('Path does not exist or is not a directory')
+  
+##############################################################################
+# Argument Parsing
+##############################################################################
+import argparse, sys, os, re
+sys.path.append(os.path.expanduser('~jmarulan/work_area/utils/environment/myPython/lib/python')); 
+import cadence
+argparser = argparse.ArgumentParser(description='Get libs from CDSLIB')
+argparser.add_argument(dest='libPath', type=chk, help='Library in the cdslib')
+args = argparser.parse_args()
+##############################################################################
+# Main Begins
+##############################################################################
+if os.getenv('CDSLIB'): cdsFile = os.getenv('CDSLIB')
+else: cdsFile = os.getenv('WARD')+'/cds.lib'
+if not os.path.isfile(cdsFile): raise IOError('CDSLIB variable not available')
+cdsDt = cadence.readCds(cdsFile);
+lib = os.path.basename(args.libPath)
+cdsDt.addLibToCds([lib,args.libPath],force=True)
+

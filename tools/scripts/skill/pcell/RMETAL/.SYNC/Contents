@@ -1,0 +1,11 @@
+2
+keyed
+<Name><State><Vault><Branch><Version><DateFetched><Log><Conflict><StickyTag><MergedFrom>
+#%@ DEFINE PATH "/tcrow_dot28_s22j/s22j_rmetal/.SYNC" %#
+#%@ DEFINE ROOTUID "8e25b6e08fd2847ddb24d7753974c857" %#
+<data.dm><C><sync://wict_p1222.sync.intel.com:30001/Projects/p1222_hyperion5/oa/tcrow_dot28_s22j/s22j_rmetal/data.dm;><1><1.2><1579742656><><F><><><CacheReference=/nfs/pdx/disks/wict_db/dss_sync_cache/sad/sad81bef0eaa3ce12-1.2-1579731500-2212b4b6cc7cf659><vctime=1579731500>
+<spectre.sync.cds><C><sync://wict_p1222.sync.intel.com:30001/Projects/p1222_hyperion5/oa/tcrow_dot28_s22j/s22j_rmetal/spectre.sync.cds;><1><1.1><1579208795><><F><><><CacheReference=/nfs/pdx/disks/wict_db/dss_sync_cache/se1/se1f26cb6b7c699c4-1.1-1579208795-2212b4b6cc7cf659><_SyncColStampDataVers=1><_SyncColStampData=spectre/symbol.oa 1579208795 spectre/master.tag 1579208795><vctime=1579208795>
+<auCdl.sync.cds><C><sync://wict_p1222.sync.intel.com:30001/Projects/p1222_hyperion5/oa/tcrow_dot28_s22j/s22j_rmetal/auCdl.sync.cds;><1><1.1><1579208795><><F><><><CacheReference=/nfs/pdx/disks/wict_db/dss_sync_cache/s69/s6910d0d9db6c7f4f-1.1-1579208795-2212b4b6cc7cf659><_SyncColStampDataVers=1><_SyncColStampData=auCdl/symbol.oa 1579208795 auCdl/master.tag 1579208795><vctime=1579208795>
+<symbol.sync.cds><C><sync://wict_p1222.sync.intel.com:30001/Projects/p1222_hyperion5/oa/tcrow_dot28_s22j/s22j_rmetal/symbol.sync.cds;><1><1.1><1579208795><><F><><><CacheReference=/nfs/pdx/disks/wict_db/dss_sync_cache/s6d/s6dea1bf8ba87bf22-1.1-1579208795-2212b4b6cc7cf659><_SyncColStampDataVers=1><_SyncColStampData=symbol/symbol.oa 1579208795 symbol/master.tag 1579208795><vctime=1579208795>
+
+

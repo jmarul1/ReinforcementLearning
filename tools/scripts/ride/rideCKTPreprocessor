@@ -1,0 +1,122 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# ******************************************************************************
+#
+#/******************************************************************************
+# * Filename: rideCKTPreprocessor
+# * Overview: Handle the node numbering such that the file is ready for RIDE
+# * Date:     Q2, 2006
+# ******************************************************************************
+
+use strict;
+use File::Find;
+use File::Basename;
+use Cwd;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+my %optctl;
+&GetOptions(\%optctl, 'help', 'verbose');
+
+if ($#ARGV < 0 || exists $optctl{"help"}) {
+  print "Usage: ", basename($0),
+        " [options] <netlist with R, L, C and K> <equations>\n",
+        "Perform node numbering of netlist for RIDE.\n\n",
+        "Make sure that nodes 1-n correspond to the intended n-ports!\n",
+        "Make sure that the gnd is node 0.\n",
+        "These can preexist in the file or be specified by equating\n",
+        "with no spaces, e.g.:\n\n",
+        "  rideCKTPreprocessor file.ckt gnd=0 n1=1 n2=2 n3=3 > new.ckt\n\n",
+        "This script will start numbering the nodes after the nth integer.\n\n",
+        "Options: [-help|-h]           This info\n",
+        "         [-verbose|-v]        Enable verbose messages\n";
+  exit(1);
+}
+
+my $ports = 0;
+my $nums = 0;
+
+my %vars = ();
+
+for (my $i = 1; $i <= $#ARGV; $i++) {
+  my $str = $ARGV[$i];
+  my @parts = split '=', $str;
+  if ($#parts != 1 || $parts[1] !~ /\d+/) {
+    die "ERROR: Syntax error in command line.\n"
+  }
+  $vars{$parts[0]} = $parts[1];
+  ++$nums if ($parts[1]);
+  $ports = $ports < $parts[1] ? $parts[1] : $ports;
+}
+
+open NET, $ARGV[0] or die "ERROR: Cannot open $ARGV[0].\n";
+
+my $foundGnd = 0;
+
+my %seen_already;
+
+while (<NET>) {
+  if (/^\s*[LRClrc]\S+\s+(\S+)\s+(\S+)\s+/) {
+    my @nodes = ($1, $2);
+    for (my $i = 0; $i < 2; $i++) {
+      if ($nodes[$i] =~ /^\d+$/) {
+        if ($nodes[$i] != 0) {
+          print STDERR "Found node $nodes[$i].\n" if ($optctl{verbose});
+          $ports = $ports < $nodes[$i] ? $nodes[$i] : $ports;
+          if (!exists $seen_already{$nodes[$i]}) {
+            ++$nums;
+          }
+          $seen_already{$nodes[$i]} = 1;
+        } else {
+          print STDERR "Found ground node $nodes[$i].\n" if ($optctl{verbose});
+          $foundGnd = 1;
+        }
+      } else {
+        $vars{$nodes[$i]} = -1 if (not exists $vars{$nodes[$i]});
+      }
+    }
+  }
+}
+
+if ($nums != $ports) {
+  # This check is not that exhaustive and could be fooled.
+  die "ERROR: RIDE requires consecutive node numbers, 1 through n: $nums detected vs $ports expected.\n";
+}
+
+for my $var (keys %vars) {
+  if ($vars{$var} == -1) {
+    $vars{$var} = ++$nums;
+  } elsif (!$vars{$var}) {
+    $foundGnd = 1;
+  }
+}
+
+if ($optctl{verbose}) {
+  print STDERR "The number of nodes is $nums.\n";
+}
+
+$foundGnd or die "ERROR: GND node needs to be defined as 0.\n";
+
+open NET, $ARGV[0] or die "ERROR: Cannot open $ARGV[0].\n";
+
+while (<NET>) {
+  if (/^\s*[RCLrcl]/) {
+    my $line = $_;
+    for my $var (keys %vars) {
+      $line =~ s/\b$var\b/$vars{$var}/g
+    }
+    print $line;
+  } else {
+    print;
+  }
+}

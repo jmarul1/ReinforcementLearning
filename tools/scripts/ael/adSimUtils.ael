@@ -1,0 +1,72 @@
+////
+defun adAddPorts(context) {
+  decl jj, iter, layerId, points, pin;
+  iter = db_create_shape_iter(context);
+  for(jj=1 ; db_shape_iter_is_valid(iter); iter = db_shape_iter_get_next(iter) ) {
+    layerId = db_get_shape_layerid(iter);
+    if(sprintf("%d", db_get_purpose_number(layerId)) == "-2" && !db_shape_is_text(iter))  {   // find the pins 
+      points = adGetCenterBottomBox(db_get_shape_bbox(iter));          //get the centerbox
+      layerId = db_get_layerid(context,db_find_layer_name_by_number(context,db_get_layer_number(layerId)),"drawing");
+      pin = db_create_pin(context, car(points), car(cdr(points)),-90,layerId,jj,sprintf("P%d",jj));
+      jj++;
+      db_deselect_all(context);
+      db_select(iter);
+      db_delete_selected(context);   // remove the pins
+    }//if
+  }//for 
+}  
+
+defun adAddPortsMim(context) {
+  decl jj, iter, layerId, points, pin, layerName;
+  iter = db_create_shape_iter(context);
+  for(jj=1 ; db_shape_iter_is_valid(iter); iter = db_shape_iter_get_next(iter) ) {
+    layerId = db_get_shape_layerid(iter);
+    if(sprintf("%d", db_get_purpose_number(layerId)) == "-2" && !db_shape_is_text(iter))  {   // find the pins 
+      points = adGetCenterBox(db_get_shape_bbox(iter));          //get the centerbox
+      layerName = db_find_layer_name_by_number(context,db_get_layer_number(layerId));
+      layerId = db_get_layerid(context,layerName,"drawing");
+      if(layerName == "m2") {
+        pin = db_create_pin(context, car(points), car(cdr(points)),-180,layerId,jj,sprintf("P%d",jj));
+	}
+      if(layerName == "m3") {
+        pin = db_create_pin(context, car(points), car(cdr(points)),0,layerId,jj,sprintf("P%d",jj));
+        }
+      jj++;
+      db_deselect_all(context);
+      db_select(iter);
+      db_delete_selected(context);   // remove the pins
+    }//if
+  }//for 
+}  
+
+
+defun adCopySimViews(refLib,refCell,tgtLib,tgtCell) {
+  decl views,ii;   decl status = 0;
+  views = de_get_views_in_library_cell(refLib,refCell);
+  for(ii=0; ii<listlen(views); ii++) {
+    if(get_cellview_type(refLib,refCell,views[ii]) == "eesof_em_setup") {
+      if(strcat(refLib,":",refCell) != strcat(tgtLib,":",tgtCell)) {
+        de_copy_cellview(refLib,refCell,views[ii],tgtLib,tgtCell,views[ii]); status = 1;
+  }}}//if/if/for
+  return status;
+}
+
+defun adCreateSimFiles(libName,cellName) {
+  decl views,ii,simDir;
+  views = de_get_views_in_library_cell(libName,cellName);
+  for(ii=0; ii<listlen(views); ii++) {
+    if(get_cellview_type(libName,cellName,views[ii]) == "eesof_em_setup") {
+      simDir = strcat("simulation/",libName,"/",cellName,"/layout/",views[ii],"_MoM");
+      dex_em_writeSimulationFiles(libName,cellName,views[ii],simDir);
+  }}//if/if/for
+}
+
+defun adAreTherePorts(context) {
+  decl iter;
+  iter = db_create_net_iter(context);
+  if(db_net_iter_is_valid(iter)) 
+    return TRUE;
+  else  
+    return FALSE;
+  
+}

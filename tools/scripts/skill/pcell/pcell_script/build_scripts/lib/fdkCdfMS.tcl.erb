@@ -1,0 +1,86 @@
+##############################################################################
+## Intel Top Secret                                                         ##
+##############################################################################
+## Copyright (C) 2014, Intel Corporation.  All rights reserved.             ##
+##                                                                          ##
+## This is the property of Intel Corporation and may only be utilized       ##
+## pursuant to a written Restricted Use Nondisclosure Agreement             ##
+## with Intel Corporation.  It may not be used, reproduced, or              ##
+## disclosed to others except in accordance with the terms and              ##
+## conditions of such agreement.                                            ##
+##                                                                          ##
+## All products, processes, computer systems, dates, and figures            ##
+## specified are preliminary based on current expectations, and are         ##
+## subject to change without notice.                                        ##
+##############################################################################
+
+<%
+require 'csvhash' 
+
+#
+# GET VARIABLE VALUES FROM ARGUMENTS
+#
+csv        = vars.check('csv') 
+params      = vars.check('params').split
+param_opts = vars.check('param_opts').split
+fun        = vars.check('fun')
+cells       = vars['cell'] && vars['cell'].split
+#status       = vars.check('status')
+status       = vars['status']
+dotproc       = vars['dotproc']
+
+full_csvh = CsvHash.open csv
+
+# Only select certain rows
+csvh = full_csvh.select {|row| ((!cells or (cells.include?(row['cell']))) and (!status or (row['status'] == status)) and (!dotproc or row[dotproc] == '1'))}
+
+%>
+
+<%= do_not_edit('##') %>
+
+proc <%= fun %> { inst } {
+
+<% param_opts.each do |pname| %><% if pname == 'cell' %>  set inst [iPDK_getCurrentInst]
+  set lib  [iPDK_getInstLibName $inst]
+  set cell [iPDK_getInstCellName $inst]
+<% else %>  set <%= sprintf "%-16s", pname %> [iPDK_getParamValue <%= pname %> $inst]
+<% end %><% end %>
+
+<% param_opts.each do |pname| %>
+  fdkCdfDebug 3 "Model Condition Opt: <%= pname %> = $<%= pname %>\n"
+<% end %>
+
+  set found_match 0
+<% csvh.each do |row| %>
+
+  if { ($found_match == 0) \
+<% param_opts.select {|e| row[e] and row[e] != 'N/A'}.each do |pname| %>
+    && ($<%= pname %> == <%= row[pname].to_tcl %>) \
+<% end %>
+  } {
+<% params.each do |pname| %>
+    iPDK_setParamValue <%= pname %> <%=
+   if ( pname=='rowRepeatList' ) then
+      '"'+row[pname].strip.gsub(/\s+/, ',')+'"'
+   else
+      row[pname].to_tcl
+   end
+%> $inst 0
+<% end %>
+    set found_match 1
+  }
+<% end %>
+
+  if { $found_match == 0 } {
+    set msg "<%= fun %>: Cannot determine model based on selected options:\n"
+<% param_opts.each do |pname| %>
+    append msg "  <%= pname %> = $<%= pname %>\n"
+<% end %>
+    iPDK_sendMessage $msg "error"
+  }
+
+<% params.each do |pname| %>
+  if { [info exists <%= pname %>] } { iPDK_setParamValue <%= pname %> $<%= pname %> $inst 0 }
+<% end %>
+
+}

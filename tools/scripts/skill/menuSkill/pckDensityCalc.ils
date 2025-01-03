@@ -1,0 +1,104 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;****f* pckLayoutFunctions/pckGetDensity
+;;
+;; FUNCTION
+;;
+;;   pckGetDensity	Calculates density of layer within a given bbox
+;;
+;;			returns ==> float ( between 0 and 1 )
+;;
+;;  USAGE
+;;
+;;	( pckGetDensity bbox lpp @optional (cv nil) (tempCV nil) )
+;;
+;;	bbox - window used for density calculation
+;;	lpp - layer-purpose pair ex. ( list "metal1" "drawing" )
+;;	cv - target cell view
+;;	tempCV - cell view where shapes in target window are manipulated
+;;****
+;;****f* pckLayoutFunctions/pckGetShapesArea
+;;
+;; FUNCTION
+;;
+;;   pckGetShapesArea	Calculates area of a list of bboxes (overlaping areas are counted twice)
+;;
+;;			returns ==> float
+;;
+;;  USAGE
+;;
+;;	( pckGetShapesArea bboxes)
+;;
+;;	bboxes - list of bboxes
+;;****
+
+(defun pckGetDensity (@rest foo) (list foo))
+(defun pckGetShapesArea (@rest foo) (list foo))
+(let ( )
+	
+	
+	;; Calcuate area of bboxes
+	(defun _pckGetShapesArea (bboxes)
+		(let ((area 0.0))
+			(foreach b bboxes
+				( when b	   
+					(setq area ( area + ( car (trBBoxDims b) ) * ( cadr (trBBoxDims b) ) ) )
+				)
+			)
+			area
+		);let
+	);defun
+	
+	
+	(defun _pckGetDensity (bbox lpp @optional (cv nil) (tempCV nil))
+		( let ( tempCV tempLib tempName (deleteTempCV nil) window shapes polygons fullArea totalArea shapesBboxes density )
+			(importSkillVar SCRATCH_LIB)
+			( when cv == nil
+				( setq cv (geGetEditCellView) )
+			)
+			( unless tempCV
+				( setq tempLib SCRATCH_LIB )
+                ( srandom (times (fileTimeModified (hiGetLogFileName)) (ipcGetPid)))
+				( setq tempName (get_pname (concat cv~>cellName "_" (random) "_calc" ) ) )
+				( setq tempCV ( dbOpenCellViewByType tempLib tempName "layout" "maskLayout" "w") )
+				( setq deleteTempCV t )
+				;;( fprintf stdout "tempLib = %L\ntempName = %L\ntempCV = %L\n" tempLib tempName tempCV )
+			)
+			( setq tempCV ( pckTransShapeHierOverlaps cv bbox lpp (dbGetMaxHierDepth) ?userTempCV tempCV ) )
+			( setq shapes tempCV~>shapes )
+			( setq polygons ( dbLayerOr tempCV lpp shapes ) )
+			( foreach s shapes
+				( dbDeleteObject s )
+			)
+			( setq window ( dbCreateRect tempCV ( list "chkBoundary" "boundary" ) bbox ) )
+			( setq shapes ( dbLayerAnd tempCV lpp polygons ( list window ) ) )
+			( dbDeleteObject window )
+			( foreach p polygons
+				( dbDeleteObject p )
+			)
+			( dbLayerTile tempCV lpp shapes )
+			( foreach s shapes
+				( dbDeleteObject s )
+			)
+			( setq shapes tempCV~>shapes )
+			( foreach s shapes
+				( setq shapesBboxes ( cons s~>bBox shapesBboxes ) )
+			)
+			( setq fullArea ( _pckGetShapesArea shapesBboxes ) )
+			( setq totalArea ( _pckGetShapesArea ( list bbox ) ) )
+			( setq density fullArea / totalArea )
+			;( fprintf stdout "%s Density = %f percent\nfullArea = %f\ntotalArea = %f" ( car lpp ) density fullArea totalArea )
+			( when deleteTempCV
+				( dbClose tempCV )
+			)
+			density
+		);let
+	);defun
+	
+	(setq pckGetDensity _pckGetDensity)
+	(setq pckGetShapesArea _pckGetShapesArea)
+  
+);let
+     
+	   
+	   

@@ -1,0 +1,22 @@
+LIBRARY =  "hyperion3_s22"
+CELL = "tline"
+pcDefinePCell(
+  ;list for first argument  
+  list( ddGetObj(LIBRARY) CELL "layout")
+  ;list of pcell parameters   
+  ( (topLayer string "m8")			
+    (botLayer string "m7")
+    (via string "v7")  
+    (s      float  5u      )
+    (wm     float  5u      )    
+    (lm     float  10u     )
+    (wt     float  5u      )    
+    (lt     float  10u     )
+    (wb     float  5u      )    
+    (lb     float  10u     ))
+  ;body of the code
+  let( (recPkg) 				
+    recPkg = intel22TlPCellCore()
+    recPkg->buildMe(pcCellView topLayer via botLayer wm lm wt lt wb lb s)
+  ) ;
+) ; end of pcDefinePCell

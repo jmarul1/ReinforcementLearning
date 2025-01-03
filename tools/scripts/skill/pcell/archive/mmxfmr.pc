@@ -1,0 +1,24 @@
+LIBRARY =  "hyperion4_s22"
+CELL = "mmxfmr"
+pcDefinePCell(
+  ;list for first argument  
+  list( ddGetObj(LIBRARY) CELL "layout")
+  ;list of pcell parameters   
+  ( (priCoil string "m8")	
+    (secCoil string "m7")
+    (wM8      float  2u  )
+    (wM7      float  2u  )    
+    (doM8     float  20u   )	     
+    (doM7     float  20u   )    
+    (tl       float  5u    )    
+    (ts       float  5u    )    
+    (indType string "oct")
+    (fill    boolean nil)
+    (ext     float 0u)
+  )
+  ;body of the code
+  let( (indPkg) 
+    indPkg = intel22XfmrPCellCoreHyp4()
+    indPkg->buildXfmr(pcCellView priCoil secCoil wM8 wM7 doM8 doM7 tl ts indType fill ext) 
+  ) ;
+) ; end of pcDefinePCell

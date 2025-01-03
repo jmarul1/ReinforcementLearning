@@ -1,0 +1,213 @@
+procedure(intel22TlPCellCore()
+let( (buildMe fixTlParams)
+
+;; LAYOUT BUILD
+  procedure(buildMe(cv topLayer via botLayer w l wt lt wb lb s)
+  let( (gndW orig gnd1 gnd2)
+    w = w*1M l = l*1M s = s*1M wt = wt*1M lt = lt*1M wb = wb*1M lb = lb*1M 
+    gndW = 5     
+    ; build the middle rectangles on m8/m7
+    buildMain(cv topLayer via botLayer 0:0 gndW w l s) 
+    ; build the side
+    topPoints = buildSide(cv topLayer botLayer 0:l gndW w s)
+    ; build the endings with vias
+    topPoints = buildEndings(cv topLayer via botLayer topPoints gndW wt lt)
+    ;buildPins(cv topLayer topPoints gndW wt "p")    ; place pins
+    botPoints = foreach(mapcar ii topPoints dbTransformPoint(ii list(lt:l "MX" 1)))
+    botPoints = buildEndings(cv topLayer via botLayer botPoints gndW wb lb)
+    ;buildPins(cv topLayer botPoints gndW wb "n")    ; place pins
+    ; shift origin
+    mmMoveCellViewOrigin(cv car(cv~>bBox))
+    ; place fill
+    mapc('dbConvertPathToPolygon setof(ii cv~>shapes ii~>objType=="path"))
+    fillMe(cv)
+    ; shift origin again
+    mmMoveCellViewOrigin(cv car(cv~>bBox))
+    ;; chkBoundary
+    dbCreatePRBoundary(cv listBBox(cv~>bBox))
+    dbCreateRect(cv list("metal" "inductorID") cv~>bBox)
+  ));let;proc
+
+  procedure(buildMain(cv topLayer via botLayer orig gndW w l s);@optional (pinNames nil))
+  let( (effW box )
+    ; build gnd signal gnd
+    effW = list(gndW w gndW) 
+    for(ii 0 2 
+      box = list(orig rodAddPoints(orig nth(ii effW):l))
+      rodCreateRect(?cvId cv ?bBox box ?layer topLayer); remember the units
+      if(ii!=1 then;add vias 
+        rodCreateRect(?cvId cv ?bBox box ?layer botLayer); remember the units      
+	buildVias(cv via list(box) "v") 
+      else ; add resID
+        rodCreateRect(?cvId cv ?origin rodAddPoints(centerBox(box) -w/2.0:-0.5) ?width w ?length 1 ?layer list(topLayer "resID")) )
+      orig = rodAddToX(orig nth(ii effW)+s)   )
+    ));let;proc
+
+  procedure(buildSide(cv topLayer botLayer orig gndW w s)
+  let( (mysG mysS mysW points finalPoints delta lst)
+    ; build the first gnd
+    mysG = gndW*(2**0.5-1)
+    points = list(orig rodAddToY(orig gndW) rodAddPoints(orig mysG:gndW) rodAddPoints(orig gndW:mysG) rodAddToX(orig gndW) orig) 
+    lst = tconc(lst dbCreatePolygon(cv topLayer points))   lst = tconc(lst dbCreatePolygon(cv botLayer points))
+    finalPoints = tconc(finalPoints rodAddToY(orig gndW/2.0))
+    ; build the main line
+    mysS = s*(2**0.5-1)  mysW = w*(2**0.5-1) delta = mysG+mysS+s-gndW-s 
+    points = list(rodAddToX(orig gndW+s) rodAddPoints(orig gndW+s:mysG+mysS) rodAddPoints(orig gndW+delta:gndW+s)  rodAddToY(orig gndW+s) rodAddToY(orig gndW+s+w) rodAddPoints(orig gndW+delta+mysW:gndW+s+w) rodAddPoints(orig gndW+s+w:mysG+mysS+mysW) rodAddToX(orig gndW+s+w) rodAddToX(orig gndW+s))
+    lst = tconc(lst dbCreatePolygon(cv topLayer points))  finalPoints = tconc(finalPoints rodAddToY(orig gndW+s+w/2.0))
+    ; build the second gnd
+    delta = mysG+mysS+mysW+mysS+w+s-gndW-s-w-s   
+    points = list(rodAddToX(orig gndW+s+w+s) rodAddPoints(orig gndW+s+w+s:mysG+mysS+mysW+mysS) rodAddPoints(orig gndW+s+delta:gndW+s+w+s)  rodAddToY(orig gndW+s+w+s) rodAddToY(orig gndW+s+w+s+gndW) rodAddPoints(orig gndW+s+delta+mysG:gndW+s+w+s+gndW) rodAddPoints(orig gndW+s+w+s+gndW:mysG+mysS+mysW+mysS+mysG) rodAddToX(orig gndW+s+w+s+gndW) rodAddToX(orig gndW+s+w+s))
+    lst = tconc(lst dbCreatePolygon(cv topLayer points))   lst = tconc(lst dbCreatePolygon(cv botLayer points))        
+    finalPoints = tconc(finalPoints rodAddToY(orig gndW+s+w+s+gndW/2.0))
+    ; flip with respect to orig
+    foreach(ll car(lst) dbCopyFig(ll cv list(0:cadr(orig) "MX" 1)) )
+    car(finalPoints) ));proc
+
+  procedure(buildEndings(cv topLayer via botLayer topPoints gndW wt lt) 
+  let( (points lst effW finalPoints)
+    effW = list(gndW wt gndW)
+    for(ii 0 2
+     finalPoints = tconc(finalPoints rodAddToX(nth(ii topPoints) -lt))
+     when(lt > 0
+      points = list(nth(ii topPoints) cadr(finalPoints))
+      lst = tconc(lst dbCreatePath(cv topLayer points nth(ii effW)))
+      when(ii !=1 gnd = dbCreatePath(cv botLayer points nth(ii effW)) buildVias(cv via list(gnd~>bBox) "h"))
+      ));when ; for  
+  car(finalPoints)))
+
+  procedure(buildVias(cv via boxes dir)
+    dir = if(dir == "v" 0.8:7.4 7.4:0.8)
+    foreach(bb boxes
+      bb = list(rodAddPoints(car(bb) 0.6:0.6) rodSubPoints(cadr(bb) 0.6:0.6))
+      rodFillBBoxWithRects(?cvId cv ?layer via ?fillBBox bb ?width car(dir) ?length cadr(dir) ?spaceX 2 ?spaceY 2 ?gap "minCenter") )
+  );proc
+
+  procedure(mmMoveCellViewOrigin(cv newOrig)
+    foreach(ii cv~>shapes dbMoveFig(ii cv list(rodSubPoints(0:0 newOrig) "R0" 1) ) )
+    foreach(ii cv~>instances dbMoveFig(ii cv list(rodSubPoints(0:0 newOrig) "R0" 1) )  ) )  
+
+  procedure(buildPins(cv layer points gndW w mainPin) ;gndW signal gndW
+  let( (effW ww orig mainNet gndNet nets net)
+    effW = list(gndW w gndW)
+    mainNet = car(setof(jj cv~>nets jj~>name == mainPin))||dbCreateNet(cv mainPin) ;create nets
+    gndNet  = car(setof(jj cv~>nets jj~>name == "gnd"))  ||dbCreateNet(cv "gnd")   ;create nets
+    nets = list(gndNet mainNet gndNet)
+    for(ii 0 2
+      ww = nth(ii effW) orig = nth(ii points) net = nth(ii nets)
+      ; create the figures
+      pinFig = rodCreateRect(?cvId cv ?width 0.1*ww ?layer list(layer "pin") ?length ww ?origin rodAddToY(orig -ww/2.0))    
+      ; create the labels
+      dbCreateLabel(cv list(layer "pin") centerBox(pinFig~>dbId~>bBox) net~>name "centerCenter" "R90" "stick" 0.1*ww)
+      dbCreatePin(net pinFig~>dbId)) ; create the pin
+  ));proc
+
+  procedure(fillMe(cv)
+  let( (base m6 m7 box rows cols orig trans)
+    grid = 0.54:0.63
+    base = dbOpenCellViewByType("p1222_fillers" "p1222_filler_m5h_ind"  "layout")
+    m6 = dbOpenCellViewByType("p1222_fillers" "p1222_filler_m6o_ind" "layout")
+    m7 = dbOpenCellViewByType("p1222_fillers" "p1222_filler_m7o_ind_ld" "layout")
+    cols = ceiling(caadr(cv~>bBox)/car(grid)) rows = ceiling(cadadr(cv~>bBox)/cadr(grid))
+    dbCreateSimpleMosaic(cv base "base" 0:0 "R0" rows cols cadr(grid) car(grid))
+    dbCreateSimpleMosaic(cv m6 "m6fill" 0:0 "R0" rows cols cadr(grid) car(grid))    
+    trans = dbOpenCellViewByType("p1222_fillers" "p1222_filler_m6h_ld_indtransition" "layout")
+    dbCreateSimpleMosaic(cv trans "m6transR" cols*car(grid):0 "R0" rows 1 cadr(grid) car(grid))        
+    dbCreateSimpleMosaic(cv trans "m6transL" -car(grid):0 "R0" rows 1 cadr(grid) car(grid))        
+    mapc('dbClose list(m6 m7 trans))
+  ));proc
+  
+;;; CDF Callbacks
+  procedure(fixTlParamsCB(whoCalled cdfId)
+  let( (wm lm wt lt wb lb cdfP stop result fpath (inc 2) (gndW 5) straight mysG mysW mysS diag)
+    ; convert to number and to microns
+      wm = aelEval(cdfId~>wm~>value ?default cdfParseFloatString(cdfId~>wm~>defValue))*1e6 
+      lm = aelEval(cdfId~>lm~>value ?default cdfParseFloatString(cdfId~>lm~>defValue))*1e6 
+      wt = aelEval(cdfId~>wt~>value ?default cdfParseFloatString(cdfId~>wt~>defValue))*1e6 
+      lt = aelEval(cdfId~>lt~>value ?default cdfParseFloatString(cdfId~>lt~>defValue))*1e6 
+      wb = aelEval(cdfId~>wb~>value ?default cdfParseFloatString(cdfId~>wb~>defValue))*1e6 
+      lb = aelEval(cdfId~>lb~>value ?default cdfParseFloatString(cdfId~>lb~>defValue))*1e6 
+      s = aelEval(cdfId~>s~>value ?default cdfParseFloatString(cdfId~>s~>defValue))*1e6             
+    stop = nil
+    ; find who call and correct
+    case(whoCalled
+    ("wm" result = aelEval(wm ?minimum 2.0 ?maximum 25)   wm=result )
+    ("lm" result = aelEval(lm ?minimum 2.0 ?maximum 1000) lm=result )
+    ("wt" result = aelEval(wt ?minimum 2.0 ?maximum 25)   wt=result )
+    ("lt" result = aelEval(lt ?minimum 0.0 ?maximum 1000) lt=result )
+    ("wb" result = aelEval(wb ?minimum 2.0 ?maximum 25)   wb=result )
+    ("lb" result = aelEval(lb ?minimum 0.0 ?maximum 1000) lb=result )
+    ("s" result = aelEval(s ?minimum 2.0*2**0.5 ?maximum 25)   s=result )    
+    (t stop=t)
+    )
+    ; replace the parameter    
+    unless(stop
+      ; convert to string and attach units
+      cdfP = cdfFindParamByName(cdfId whoCalled)  
+      result = sprintf(nil strcat("%." sprintf(nil "%d" strlen("0.001")-2) "f") float(result))
+      putprop(cdfP strcat(result "u") "value")
+      ; calculate effLength
+      mysG = gndW*(2**0.5-1) mysW = wm*(2**0.5-1) mysS = s*(2**0.5-1)
+      straight = lm+2*(mysG+mysS)+lt+lb+2*(gndW+mysG+mysS+s-gndW-s) 
+      diag = ((gndW+s+wm/2.0-mysG-mysS)**2 + (gndW+s+wm/2.0-(gndW+mysG+mysS+s-gndW-s))**2)**0.5
+      l = ceiling(straight+2*diag) 
+      cdfId~>l~>value= strcat(aelEval(l ?str t) "u")
+      ; file stuff
+      fpath = "/nfs/pdx/disks/dcti_disk0036/work_x22a/template_de2/jmarulan/myDocs/hyperion/hyperion3/sparameters/"
+      cdfId~>filename~>value = sprintf(nil "tline_%sw_%sl_%ss_21x1r2m2u1_tttt.s6p" dotToP(wm) dotToP(l) dotToP(s))
+      cdfId~>file~>value=strcat("\"" fpath cdfId~>filename~>value "\"")
+;      when(not(isFile(cdfId~>file~>value)) warn("Filepath does not exist"))
+    )    
+  t))
+
+;;; GENERIC FNS  
+  procedure(aelEval(entry @key (minimum nil) (maximum nil) (default nil) (grid nil) (str nil)) ;default is assumed correct && on grid
+  let( (out)
+   when((minimum && grid) minimum = ceiling(minimum/grid)*grid)
+   when((maximum && grid) maximum = floor(maximum/grid)*grid)
+   when(type(entry)=='string entry = cdfParseFloatString(entry))
+   default = (default || minimum || entry)
+   if(numberp(entry) then
+     cond( 
+       ( (minimum && entry < minimum)  out = minimum)
+       ( (maximum && entry > maximum)  out = maximum)
+       (t out = entry)
+       )
+     when(grid out=round(out/grid)*grid)   
+   else out = default
+   )
+   when(str out=sprintf(nil "%L" out))
+  out))
+
+  procedure(dotToP(num)
+  num = pcreReplace(pcreCompile("\\.") numToStr(num) "p" 0)  )
+
+  procedure(numToStr(numberGiven @optional (precision 6) )
+  let( ()
+    if(numberp(precision) then
+      sprintf(precision "%d" fix(precision)) 
+    else 
+      sprintf(precision "%d" fix(6))
+    ) ; if
+    case(type(numberGiven)
+      (fixnum sprintf(numberGiven "%d" numberGiven))
+      (flonum sprintf(numberGiven strcat("%." precision "f") float(numberGiven)))
+      (t numberGiven)
+    ) ; case
+    when(rexMatchp("[0-9]*\\." numberGiven )
+      while(rexMatchp("0$" numberGiven) numberGiven = rexReplace(numberGiven "" 1)) ; while to remove extra "0s"
+      when(rexMatchp("\\.$" numberGiven) numberGiven = rexReplace(numberGiven "" 1) ) ; when to make integer for ".0"
+    ) ; when
+    numberGiven
+  )) ; procedure
+
+  procedure(listBBox(bBoxGiven)
+  let( (leftBotX leftBotY rightTopX rightTopY)
+    leftBotX = caar(bBoxGiven)
+    leftBotY = cadar(bBoxGiven)
+    rightTopX = caadr(bBoxGiven)
+    rightTopY = cadadr(bBoxGiven)
+    list(list(leftBotX leftBotY) list(leftBotX rightTopY) list(rightTopX rightTopY) list(rightTopX leftBotY) )
+  )) ; procedure
+    
+list(nil 'buildMe buildMe 'fixTlParamsCB fixTlParamsCB)
+))

@@ -1,0 +1,169 @@
+(defun pckVirtualStaticCell_createFunctionFile () t)
+(defun pckVirtualStaticCell_publishCell () t)
+(defun pckVirtualStaticCell_drawShapesFromList () t)
+(defun pckVirtualStaticCell_chopCell () t)
+
+(let ()
+
+(defun _pckVirtualStaticCell_createFunctionFile (funName cellList filePath @optional (fileMode "w"))
+  (let (cvId shapeList)
+	;;Extract shapes
+	(foreach cell cellList
+			 (setq cvId (dbOpenCellViewByType (car cell) (cadr cell) "layout" "maskLayout" "r"))
+			 (setq shapeList (cons (_pckVirtualStaticCell_extractShapes cvId) shapeList))
+			 (setq shapeList (cons (if (caddr cell) (caddr cell) (cadr cell)) shapeList))
+			 (dbClose cvId))
+	
+	;;Write File
+	(_pckVirtualStaticCell_writeShapesToFile funName filePath shapeList fileMode)
+	
+	t))
+
+(defun _pckVirtualStaticCell_extractShapes (cvId)
+  (let (outList lpps)
+	(foreach shape (rodGetNamedShapes cvId)
+			 (case (getSGq (getSGq shape dbId) objType)
+			   ("rect"
+				(setq outList (cons (list "rect" (getSGq (getSGq shape dbId) lpp) (getSGq (getSGq shape dbId) bBox) (getSGq shape name)) outList)))
+			   ("polygon"
+				(setq outList (cons (list "polygon" (getSGq (getSGq shape dbId) lpp) (getSGq (getSGq shape dbId) points) (getSGq shape name)) outList)))
+			   (t
+				(pckWarn "_pckVirtualStaticCell_extractShapes" (sprintf nil "Invalid shape type: %L" (getSGq (getSGq shape dbId) objType))))))
+
+	(foreach shape (getSGq cvId shapes)
+			 (unless (member shape (getSGq (rodGetNamedShapes cvId) dbId))
+			   (case (getSGq shape objType)
+				 ("rect"
+				  (setq outList (cons (list "rect" (getSGq shape lpp) (getSGq shape bBox) nil) outList)))
+				 ("polygon"
+				  (setq outList (cons (list "polygon" (getSGq shape lpp) (getSGq shape points) nil) outList)))
+				 (t
+				  (pckWarn "_pckVirtualStaticCell_extractShapes" (sprintf nil "Invalid shape type: %L" (getSGq shape objType)))))))
+	outList))
+
+(defun _pckVirtualStaticCell_writeShapesToFile (funName filePath shapeList fileMode)
+  (let (file)
+	(setq file (outfile filePath fileMode))
+	(fprintf file "(defun %s ()\n" funName)
+	(fprintf file "  (quote\n")
+	(fprintf file "    (\n")
+	(foreach item shapeList
+			 (if (atom item)
+			   (fprintf file "    %L\n" item)
+			   (progn
+				 (fprintf file "     (\n")
+				 (foreach elem item
+						  (fprintf file "      %L\n" elem))
+				 (fprintf file "      )\n"))))
+	(fprintf file "    )\n")
+	(fprintf file "  )\n")
+	(fprintf file ")\n")
+	(close file)
+	t))
+
+(defun _pckVirtualStaticCell_drawShapesFromList (cvId refCellName shapeList)
+  (let ()
+	(foreach elem (cadr (member refCellName shapeList))
+			 (case (car elem)
+			   ("rect"
+				(_pckVirtualStaticCell_drawRect cvId elem))
+			   ("polygon"
+				(_pckVirtualStaticCell_drawPolygon cvId elem))
+			   (t
+				(pckWarn "_pckVirtualStaticCell_drawShapesFromList" (sprintf nil "Invalid shape type: %L" (car elem))))))
+	t))
+
+(defun _pckVirtualStaticCell_drawRect (cvId shapeDef)
+  (let ()
+	(if (nth 3 shapeDef)
+	  (rodCreateRect ?name (nth 3 shapeDef)
+					 ?cvId cvId
+					 ?layer (nth 1 shapeDef)
+					 ?bBox (nth 2 shapeDef))
+	  (dbCreateRect cvId (nth 1 shapeDef) (nth 2 shapeDef)))
+	t))
+
+(defun _pckVirtualStaticCell_drawPolygon (cvId shapeDef)
+  (let (dbId)
+	(setq dbId (dbCreatePolygon cvId (nth 1 shapeDef) (nth 2 shapeDef)))
+	(when (nth 3 shapeDef)
+	  (rodNameShape ?name (nth 3 shapeDef) ?shapeId dbId))
+	t))
+
+(defun _pckVirtualStaticCell_chopCell (cvId pitch chopRange keepLayers @optional (tileShapes t))
+  (let (chopShape lpps originalShapes tempShapes namedShapes)
+	;;Collect all named shapes
+	(setq namedShapes (rodGetNamedShapes cvId))
+	
+	;;collect all shapes in original layout
+	(setq originalShapes (getSGq cvId shapes))
+	
+	;;find all LPPs used in layout
+	(foreach elem (getSGq cvId lpps)
+			 (setq lpps (cons (list (getSGq elem layerName) (getSGq elem purpose)) lpps)))
+	
+	;;Create chop region and chopped cell extent ROD
+	(setq chopShape (getSGq
+					 (rodCreateRect ?name "cellExtent"
+									?layer (list "background" "drawing")
+									?bBox (list
+										   (list (if (car chopRange) (times pitch (car chopRange)) (leftEdge (getSGq cvId bBox))) (bottomEdge (getSGq cvId bBox)))
+										   (list (if (cadr chopRange) (times pitch (cadr chopRange)) (rightEdge (getSGq cvId bBox))) (topEdge (getSGq cvId bBox)))))
+					 dbId))
+
+	;;Chop shapes
+	(foreach lpp lpps
+			 (setq tempShapes (dbLayerAnd cvId (list "background" "drawing") (list chopShape) (setof x originalShapes (equal (getSGq x lpp) lpp))))
+			 (setq tempShapes (dbLayerOr cvId (list "background" "drawing") tempShapes))
+			 (if tileShapes
+			   (setq tempShapes (dbLayerTile cvId lpp tempShapes))
+			   (setq tempShapes (dbLayerOr cvId lpp tempShapes)))
+			 ;;Strip out unwanted layers
+			 (if (or
+				  (member lpp keepLayers)
+				  (not (car keepLayers)))
+			   (setq namedShapes (_pckVirtualStaticCell_nameChoppedShape cvId tempShapes namedShapes))
+			   (foreach shape tempShapes
+						(setSGq shape (list "background" "drawing") lpp))))
+	
+	;;Set original layers to background
+	(foreach shape originalShapes
+			 (setSGq shape (list "background" "drawing") lpp))
+
+	;;Remove names from original shapes where lpp = background
+	(foreach elem (setof x (rodGetNamedShapes cvId) (member (getSGq x dbId) originalShapes))
+			 (rodUnNameShape elem))
+	t))
+
+(defun _pckVirtualStaticCell_nameChoppedShape (cvId choppedShapes namedShapes)
+  (let (newRod foundChoppedShapes name)
+	(when namedShapes
+	  (foreach rod (setof x namedShapes (equal (getSGq (getSGq x dbId) lpp) (getSGq (car choppedShapes) lpp)))
+			   (setq foundChoppedShapes (setof x (dbGetTrueOverlaps cvId (list (getSGq rod lowerLeft) (getSGq rod upperRight)) (getSGq (getSGq rod dbId) lpp) 0) 
+											   (member x choppedShapes)))
+			   (when foundChoppedShapes
+				 (setq name (getSGq rod name))
+				 (setq namedShapes (setof x namedShapes (nequal (getSGq x name) name)))
+				 (rodUnNameShape rod)
+				 (rodNameShape ?name name
+							   ?shapeId (car foundChoppedShapes))
+				 (setq name nil))))
+	  namedShapes))
+
+(defun _pckVirtualStaticCell_publishCell (funName outputLibName @optional (renameDpl nil))
+  (let (cvId cellNames)
+	(foreach elem (eval (list (stringToSymbol funName)))
+			 (when (atom elem)
+				 (setq cellNames (cons elem cellNames))))
+	(foreach elem cellNames
+			 (setq cvId (dbOpenCellViewByType outputLibName (if (get renameDpl elem) (get renameDpl elem) elem) "layout" "maskLayout" "w"))
+			 (_pckVirtualStaticCell_drawShapesFromList cvId elem (eval (list (stringToSymbol funName))))
+			 (dbSave cvId)
+			 (dbClose cvId))
+	t))
+
+(setq pckVirtualStaticCell_createFunctionFile _pckVirtualStaticCell_createFunctionFile)
+(setq pckVirtualStaticCell_publishCell _pckVirtualStaticCell_publishCell)
+(setq pckVirtualStaticCell_drawShapesFromList _pckVirtualStaticCell_drawShapesFromList)
+(setq pckVirtualStaticCell_chopCell _pckVirtualStaticCell_chopCell)
+);let

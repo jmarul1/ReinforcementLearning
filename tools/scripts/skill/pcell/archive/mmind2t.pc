@@ -1,0 +1,24 @@
+LIBRARY =  "hyperion4_s22"
+CELL = "mmind2t"
+pcDefinePCell(
+  ;list for first argument  
+  list( ddGetObj(LIBRARY) CELL "layout")
+  ;list of pcell parameters   
+  ( (topLayer string "m8")	
+    (w      float  2u    )
+    (dx     float  20u   )	     
+    (dy     float  20u   )    
+    (tl     float  5u    )    
+    (ts     float  5u    )    
+    (indType string "oct")
+    (fill   boolean nil)    
+  )
+  ;body of the code
+  let( (indPkg) 				
+    indPkg = intel22IndPCellCoreHyp4()
+    if(indType == "oct" then
+      indPkg->buildOct(pcCellView topLayer dx dy w tl ts fill) 
+    else
+      indPkg->buildRec(pcCellView topLayer dx dy w tl ts fill) )
+  ) ;
+) ; end of pcDefinePCell

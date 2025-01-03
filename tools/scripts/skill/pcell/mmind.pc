@@ -1,0 +1,59 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Intel Top Secret                                                           ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Copyright (C) 2020, Intel Corporation.  All rights reserved.               ;
+;                                                                            ;
+; This is the property of Intel Corporation and may only be utilized         ;
+; pursuant to a written Restricted Use Nondisclosure Agreement               ;
+; with Intel Corporation.  It may not be used, reproduced, or                ;
+; disclosed to others except in accordance with the terms and                ;
+; conditions of such agreement.                                              ;
+;                                                                            ;
+; All products, processes, computer systems, dates, and figures              ;
+; specified are preliminary based on current expectations, and are           ;
+; subject to change without notice.                                          ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Author:
+;   Mauricio Marulanda
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; make sure LIBRARY CELL CT AND defaults ARE DEFINED BEFORE RUNNING, as well as the pcellCore,
+let( (cv defaults pkg bag)
+pkg = mmIndPCellCore() bag = pkg->readPropBag(ddGetObj(libName cellName) ?text t) defaults = bag->defaults 
+cv = pcDefinePCell(
+  ;list for first argument  
+  list( ddGetObj(libName) cellName "layout")
+  ;list of pcell parameters   
+  ( (topLayer string  defaults->topLayer                       )	
+    (viaLayer string  defaults->viaLayer                       )  
+    (botLayer string  defaults->botLayer                       )  
+    (n       float    cdfParseFloatString(defaults->n)         )
+    (w       float    cdfParseFloatString(defaults->w)         )
+    (s       float    cdfParseFloatString(defaults->s)         )    
+    (dx      float    cdfParseFloatString(defaults->dx)        )	     
+    (dy      float    cdfParseFloatString(defaults->dy)        )    
+    (tl      float    cdfParseFloatString(defaults->tl)        )    
+    (ts      float    cdfParseFloatString(defaults->ts)        )    
+    (octSym  float    cdfParseFloatString(defaults->octSym)    )        
+    (indType string   defaults->indType                        )
+    (fill    boolean  t                                        )    
+    (ct      boolean  CT                                       )    
+  )
+  ;body of the code
+  let( (indPkg shp shapes) 				
+    ; convert everything to microns
+    w = 1M*w s = 1M*s dx = 1M*dx dy = 1M*dy tl = 1M*tl ts = 1M*ts n = pcFix(n)
+    indPkg = mmIndPCellCore()
+    ; read propBag and correct dimensions
+    pB  = indPkg->readPropBag(pcCellView) 
+    when(indType=="rec" octSym=0) w = min(max(car(pB->sizeTopLayer)+pB->grid w) cadr(pB->sizeTopLayer)-pB->grid) s = max(pB->spaceTopLayer+pB->grid s) 
+    ; build the pcell
+    shp = indPkg->buildLeads(pcCellView pB->defaults->topLayer w tl ts)                                          		        			shapes=lconc(shapes shp)
+    shp = indPkg->buildBrackets(pcCellView pB->defaults->topLayer indType n w s dx dy tl ts octSym pB)                    					shapes=lconc(shapes shp)
+    shp = indPkg->buildInnerOuterHBars(pcCellView pB->defaults->topLayer pB->defaults->viaLayer pB->defaults->botLayer indType n w s dx dy tl ts octSym pB ct) 	shapes=lconc(shapes shp)    
+    shp = indPkg->buildTheCrossOvers(pcCellView pB->defaults->topLayer pB->defaults->viaLayer pB->defaults->botLayer n w s dx dy tl ts octSym pB)     		shapes=lconc(shapes shp)        
+    indPkg->finalTouch(pcCellView pB->defaults->topLayer indType n w s dx dy tl ts octSym car(shapes) fill pB)
+  ) ; let
+) ; end of pcDefinePCell
+dbClose(cv)
+) ; let

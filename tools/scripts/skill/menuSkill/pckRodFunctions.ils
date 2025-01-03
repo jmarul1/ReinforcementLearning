@@ -1,0 +1,899 @@
+(defun pckRodCreateRect () 
+  t)
+
+(defun pckRodAlign ()
+  t)
+
+(defun pckGetShapesBBox () t)
+;; (defun pckRodSortBBox () t)
+(defun pckRodGetLppList () t)
+(defun pckRodGetDistX ()
+  t)
+(defun pckRodGetDistY ()  
+    t)
+(defun pckRodPointX  ()  
+  t)
+(defun pckRodPointY () 
+  t)
+(defun pckRodPoint () 
+  t)
+(defun pckRodGetObj ()
+  t)
+
+
+
+ (let ()
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodCreateRect ( @key
+                            (name nil)                         
+                            (layer "metal1")
+                            (width 1)
+                            (length 1)
+                            (origin '( 0 0))
+                            (bBox nil)
+                            (elementsX nil)
+                            (elementsY nil)
+                            (spaceX 0)
+                            (spaceY 0)
+                            (reSize (list (list 0 0 0 0)))
+                            (cvId (importSkillVar pcCellView))
+                            (fillBBox  nil)
+                            (gap "minimum")
+                            (returnExtent nil)
+                            (transform nil)
+                            (userFunction nil)
+                            (refObj nil)
+                            (refHandle "lL")
+                            (refPoint nil)
+                            (alignObj nil)
+                            (alignHandle "lL")
+                            (maintain nil)
+                            (xSep 0)
+                            (ySep 0)                            
+                            (refRow nil)
+                            (refCol nil)
+                            
+                            ) ;;@key
+    (let ( shapeList figs func deltaX deltaY refX refY box lppList tmp)
+      (unless origin origin = 0:0)
+      lppList = (_pckRodGetLppList layer)
+      
+      (when userFunction
+        (unless (equal (typep (car userFunction)) 'list  ) userFunction = (list userFunction)))
+      
+      (when (equal (typep refObj) 'string)
+        tmp = refObj
+        refObj = (rodGetObj refObj cvId)
+            (unless refObj (error (sprintf nil "pckRodCreateRect: %L is not the name of a ROD object!\n" tmp)))
+          (unless (_pckRodCheckHandle refObj refHandle)
+              (error (sprintf nil "pckRodCreateRect: refHandle %L is not a valid handle\n Valid handles are %L"
+                              refHandle (_pckRodValidHandles refObj))))
+            
+            )
+      
+      (unless (_pckRodGetlength origin) == 2 (error (sprintf nil "pckRodCreateRect: ?origin %L must be a list of 2 values!" origin)))
+      (when refObj origin = (rodAddPoints (pckSG refObj refHandle) (list xSep ySep)))
+      
+      (if (or refRow refCol)
+          (progn
+            (unless refCol refCol = 1)
+            (unless refRow refRow = 1)
+            deltaX = (car (_pckRodGetMosaicDelta refObj))
+            deltaY = (cadr (_pckRodGetMosaicDelta refObj))
+            refX = (plus (rodPointX (pckSG refObj refHandle))  (times (difference refCol 1 )  deltaX)) 
+            refY = (plus (rodPointY (pckSG refObj refHandle))  (times (difference refRow 1)  deltaY))
+            origin = (rodAddPoints (list refX refY) (list xSep ySep))            
+            )
+          (progn
+            (when
+                (_pckRodIsMosaic refObj)
+              box = (_pckRodGetMosiacBbox refObj)
+              
+                origin = (_pckRodGetHandleOffset (car (trBBoxDims box)) (cadr (trBBoxDims box)) refHandle)
+                
+                )
+            
+            )
+        
+          )
+      
+      (when refPoint
+        (unless (_pckRodGetlength refPoint) == 2 (error (sprintf nil "pckRodCreateRect: ?refPoint %L must be a list of 2 values!" refPoint)))
+        origin = (rodAddPoints refPoint (list xSep ySep)) )
+      (unless alignObj alignObj = name)
+      (cond
+       ((or (and elementsX (greaterp elementsX 1))  (and elementsY (greaterp elementsY 1)) )
+         ;; (unless (when elementsX > 1  spaceX > 0) (error (sprintf nil "pckRodCreateRect: ?spaceX is %L - none-zero values not allowed!\n" spaceX)))
+         shapeList = (_pckRodCreateArray cvId elementsX elementsY origin spaceX spaceY width length (car lppList) name
+                                         alignObj alignHandle  )
+         (rodCreateRect ?cvId cvId ?layer '("background" "drawing") ?name name  ?bBox (_pckGetShapesBBox shapeList))
+        
+        )
+        
+       (fillBBox
+         
+         shapeList = (_pckRodFillBBoxWidthRects cvId origin spaceX spaceY width length (car lppList) name 
+                                                alignHandle (_pckGetOrthoBBox fillBBox) gap  )
+         
+         (when shapeList
+		   (rodCreateRect ?cvId cvId ?bBox (_pckGetShapesBBox shapeList) ?layer '("background" "drawing") ?name name)
+		   shapeList = (_pckGetSortedShapeList shapeList fillBBox)
+           
+		   shapeList = (_pckRodNameShapes shapeList name)
+           ;; (fprintf stdout "shapeList = %L\n" shapeList)
+           )
+         ;; (rodCreateRect ?cvId cvId ?layer '("background" "drawing") ?name name  ?bBox (_pckGetShapesBBox shapeList))
+         
+         )
+     /*   ((and !elementsX !elementsY !refCol !refRow (equal (_pckRodGetlength lppList) 1) refObj)
+         alignObj = (rodCreateRect ?cvId cvId ?width width ?name name ?length length ?layer (car lppList))
+         (unless (_pckRodCheckHandle alignObj alignHandle)
+           (error (sprintf nil "pckRodCreateRect: alignHandle %L is not a valid handle.\n Valid handles are %L"
+                           alignHandle (_pckRodValidHandles alignObj))))
+        (pckRodAlign ?cvId cvId ?refObj refObj ?refHandle refHandle ?alignObj alignObj ?alignHandle alignHandle
+                      ?xSep xSep ?ySep ySep ?maintain maintain )
+         
+         shapeList = (list alignObj))
+        
+    */    ((or refPoint refObj )         
+         (if bBox
+             (progn               
+               bBox = (_pckRodShiftBBox origin alignHandle bBox)
+               shapeList = (list (rodCreateRect ?cvId cvId ?name name ?layer (car lppList) ?origin origin
+                                                ?bBox bBox ))
+               )
+             (progn
+              shapeList = (list (rodCreateRect ?cvId cvId ?name name ?layer (car lppList)
+                                              ?origin (rodSubPoints origin (_pckRodGetHandleOffset width length alignHandle))
+                                              ?width width ?length length ))
+               
+               )
+             
+             )         
+         )
+        (!refObj  ;; no alignment to refObj
+         
+         (if bBox
+             (shapeList = (list (rodCreateRect ?cvId cvId ?name name ?layer (car lppList) ?bBox bBox))) 
+             (shapeList = (list (rodCreateRect ?cvId cvId ?name name ?layer (car lppList) ?length length ?width width ?origin origin))) 
+             )
+         )
+        ) ;;cond
+    
+      ;; post process secondary shape modification when layer is list of lpps
+      (when (and (equal (typep layer) 'list) (equal (typep (car layer)) 'list) )
+        
+        ;;convert resize to list of lists        
+        (unless (equal (typep (car reSize) ) 'list)  reSize = (list reSize))
+        
+        (for i 1 (difference (_pckRodGetlength lppList) 1)
+ 
+             figs = (mapcar (lambda (x)
+                              
+                              (if x~>dbId ;; rod object, not a shape
+                                  (dbCreateRect cvId (nth i layer) (_pckRodReSizeBBox x~>dbId~>bBox (nth i-1 reSize)))
+                                  (dbCreateRect cvId (nth i layer) (_pckRodReSizeBBox x~>bBox (nth i-1 reSize)))
+                                  )
+
+                              ) shapeList)
+             
+             
+             ;; shapeList = (append figs shapeList)
+             (when (nth i-1 userFunction)
+               func = (nth i-1 userFunction)
+               func = (reverse func)
+               func = (cons (pckFlattenList (list 'list  figs))   func)               
+               func = (reverse func)               
+               (eval func)
+                 
+                
+               )
+             )
+        )
+     ;; if shapeList is a single element but not a 1 element array, return the element, otherwise return list
+      
+      (if returnExtent
+          (if (cdr shapeList)              
+              (_pckGetShapesBBox shapeList)
+              (car shapeList)~>dbId~>bBox
+              )
+          (if (cdr shapeList)
+              shapeList 
+              (progn
+                (if (and (equal elementsX 1) (equal elementsY 1))
+                    shapeList
+                    (car shapeList)
+                    )
+                )
+                           
+              )
+          
+          )
+        ;; shapeList = (pckFlattenList shapeList)
+        
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetlength (list )
+    (let ()
+      (length list)
+      )
+    )
+  
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckGetOrthoBBox (bBox)
+    (let (x0 x1 y0 y1 box)
+      x0 = (car (car bBox))
+      x1 = (car (cadr bBox))
+      y0 = (cadr (car bBox))
+      y1 = (cadr (cadr bBox))
+      box = (list (list (min x0 x1) (min y0 y1)) (list (max x0 x1) (max y0 y1)))
+      (when (lessp x1 x0) box = (pckShiftBbox box (minus x0) 0))
+      (when (lessp y1 y0) box = (pckShiftBbox box 0 (minus y0)))
+      box
+      )
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodReSizeBBox (bBox size)
+    (let ()
+       ;; (fprintf stdout "bBox = %L\n" bBox)
+      (if size
+          (list
+           (rodAddPoints (car bBox) (list (nth 0 size) (nth 1 size)))
+           (rodAddPoints (cadr bBox) (list (nth 2 size) (nth 3 size)))
+           )
+          bBox
+          )      
+      )
+    )
+  
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetLppList (lyrList)
+    (progn      
+        (cond
+          ((and (equal (typep lyrList) 'string) (equal lyrList "background")) 
+           lyrList = (list '("background" "drawing")))
+          ((and (equal (typep lyrList) 'string) (equal lyrList "chkBoundary"))
+           lyrList = (list '("chkBoundary" "boundary") ))
+          ((and (equal (typep lyrList) 'string) (equal lyrList "pckDebug"))
+           (fprintf stdout "no lpp defined for %L\n" lyrList))
+          ((equal (typep lyrList) 'string)
+           lyrList = (list (list lyrList "drawing")) )
+          ((and (equal (typep lyrList) 'list) (equal (typep (car lyrList)) 'string))
+           lyrList = (list lyrList))
+          )
+      lyrList
+      )
+    )
+  
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodFillBBoxWidthRects (cvId origin spaceX spaceY width length layer name 
+                                alignHandle fillBBox gap)
+    (let (shapeList k)
+      fillBBox = (_pckRodShiftBBox origin alignHandle fillBBox)
+      (unless name name = (gensym "rect"))
+      shapeList = (rodFillBBoxWithRects ?cvId cvId ?layer layer ?fillBBox fillBBox ?width width ?length length
+                                         ?spaceX spaceX ?spaceY spaceY ?gap gap)
+       
+
+      
+      shapeList
+      )
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodShiftBBox (origin alignHandle bBox)
+    (let (shiftX shiftY alignPt)      
+      shiftX = (times (abs (difference (car origin) (car (car bBox)))) (if (lessp (car (car bBox)) (car origin) ) 1 -1))  
+      shiftY = (times (abs (difference (cadr origin) (cadr (car bBox)))) (if (lessp (cadr (car bBox)) (cadr origin) ) 1 -1))  
+      alignPt = (_pckRodGetHandleOffset (car (trBBoxDims bBox)) (cadr (trBBoxDims bBox)) alignHandle )      
+      bBox = (pckShiftBbox bBox (plus shiftX (minus (car alignPt)) )  (plus shiftY (minus (cadr alignPt))) )
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetRowCol (shapeList)
+    (let (x y row col)
+      row = col = 0
+      x = (car (car (car shapeList)~>bBox))
+      y = (cadr (car (car shapeList)~>bBox))
+      (foreach shape shapeList
+               (when (pckEQP (car (car shape~>bBox)) x)  col++)
+               (when (pckEQP (cadr (car shape~>bBox)) y) row++ )
+               )
+      (list row col)
+      )
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodCreateArray (cvId elementsX elementsY origin spaceX spaceY width length layer name
+                             alignObj alignHandle )
+    (let (alignPt offsetX offsetY shapeList k box fillBBox)
+       
+      (when (or elementsX == nil elementsX == 1)
+        elementsX = 1
+        spaceX = .001
+        )
+      (when (or elementsY == nil elementsY == 1)
+        elementsY = 1
+        spaceY = .001
+        )
+      ;; code to align either extent, or specific array element
+      (if (cadr (parseString alignObj "."))
+          (progn  ;; aligning to an array element
+            alignPt = (_pckRodGetHandleOffset width length alignHandle )
+      
+            offsetX =  (if (lessp spaceX 0)
+                           (times (plus (abs spaceX) width) (difference (atoi (nth 1 (parseString alignObj "."))) 1)  ) 
+                           (minus (times (plus (abs spaceX) width) (difference (atoi (nth 1 (parseString alignObj "."))) 1)  )) 
+                           )
+            offsetY = (if (lessp spaceY 0)
+                          (times (plus (abs spaceY) length) (difference (atoi (nth 2 (parseString alignObj "."))) 1)  ) 
+                          (minus (times (plus (abs spaceY) length) (difference (atoi (nth 2 (parseString alignObj ".")) ) 1)  )) 
+                          )
+
+            origin = (list (plus (car origin) offsetX (minus (car alignPt)) ) (plus (cadr origin) offsetY (minus (cadr alignPt)) ))
+             fillBBox = (_pckRodGetFillBBox origin elementsX elementsY spaceX spaceY width length)
+             shapeList = (rodFillBBoxWithRects ?cvId cvId ?layer layer ?width width ?length length ?fillBBox fillBBox
+                                        ?spaceX (abs spaceX)  ?spaceY (abs spaceY) ?gap "minimum")
+             shapeList = (_pckGetSortedShapeList shapeList fillBBox)
+            )
+          (progn ;; aligning to array extent
+            
+            fillBBox = (_pckRodGetFillBBox origin elementsX elementsY (abs spaceX)  (abs spaceY)  width length)
+            
+            alignPt = (_pckRodGetHandleOffset (car (trBBoxDims fillBBox)) (cadr (trBBoxDims fillBBox)) alignHandle )
+            
+            origin = (rodSubPoints origin alignPt)
+            
+            
+            fillBBox = (_pckRodGetFillBBox origin elementsX elementsY (abs spaceX)  (abs spaceY)  width length)
+            
+            shapeList = (rodFillBBoxWithRects ?cvId cvId ?layer layer ?width width ?length length ?fillBBox fillBBox
+                                        ?spaceX (abs spaceX) ?spaceY (abs spaceY) ?gap "minimum")
+            ;; revert to original fillBBox for shape sorting and naming
+            fillBBox = (_pckRodGetFillBBox origin elementsX elementsY spaceX  spaceY  width length)
+            shapeList = (_pckGetSortedShapeList shapeList fillBBox)
+            )
+          )
+ 
+      (_pckRodNameShapes shapeList name)
+
+      shapeList
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodCheckHandle (rodObj handle)
+    (let (list1)
+      list1 = '("lL" "lC" "lR" "cL" "cC" "cR" "uL" "uC" "uR")
+      (if (member handle (_pckRodValidHandles rodObj)) t nil)
+      (if (or (member handle list1) (member handle rodObj~>systemHandleNames)) t nil)
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  
+  (defun _pckRodValidHandles  (rodObj )
+   (let (list1)
+     list1 = '("lL" "lC" "lR" "cL" "cC" "cR" "uL" "uC" "uR")
+     (append list1 rodObj~>systemHandleNames)
+     )
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetHandleOffset (width length handle)
+    (let (origin bBox)
+      bBox = (list (list 0 0) (list width length))
+     
+      (cond
+        ((or (equal handle "lL") (equal handle "lowerLeft" ))
+         origin =  (car bBox))
+        ((or (equal handle "uL") (equal handle "upperLeft" ))
+         origin = (list (car (car bBox)) (cadr (cadr bBox))))
+        ((or (equal handle "uR") (equal handle "upperRight" ))
+         origin = (list (car (cadr bBox)) (cadr (cadr bBox))))
+        ((or (equal handle "lR") (equal handle "lowerRight" ))
+         origin = (list (car (cadr bBox)) (cadr (car bBox))))
+        ((or (equal handle "cL") (equal handle "centerLeft" ))
+         origin = (list (car (car bBox)) (pckPutOnGrid (quotient length 2.000))))
+        ((or (equal handle "uC") (equal handle "upperCenter" ))
+         origin = (list (pckPutOnGrid (quotient (if (lessp (car (car bBox)) 0) (car (car bBox)) (car (cadr bBox)) ) 2))
+                        (cadr (cadr bBox))))
+        ((or (equal handle "cR") (equal handle "centerRight" ))
+         origin = (list (car (cadr bBox)) (pckPutOnGrid (quotient length 2.000)))
+        
+         )
+        ((or (equal handle "lC") (equal handle "lowerCenter" ))
+         origin = (list (pckPutOnGrid (quotient (if (lessp (car (car bBox)) 0) (car (car bBox)) (car (cadr bBox)) ) 2))
+                        (cadr (car bBox))))
+        ((or (equal handle "cC") (equal handle "centerCenter")) origin = (centerBox bBox))
+        (t (error (sprintf nil "pckRodCreateRect: AlignHandle %L is not a valid handle\n
+                  Valid handles are %L\n" handle '("lL" "lC" "lR" "cL" "cC" "cR" "uL" "uC" "uR"
+                                                    "lowerLeft" "lowerCenter" "lowerRight" "centerLeft" "centerCenter" "centerRight"
+                                                     "upperLeft" "upperCenter" "upperRight")))
+         )
+        )
+     
+      )
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetFillBBox (origin elementsX elementsY spaceX spaceY width length)
+    (let (bBox boxWX boxWY)
+    
+      boxWX = (plus (times width elementsX) (times (difference elementsX 1) (abs spaceX)) )
+    
+      boxWY = (plus (times length elementsY) (times (difference elementsY 1) (abs spaceY) ))
+    
+      (cond
+        ((and (lessp spaceX 0) (geqp spaceY 0)) 
+         origin = (rodAddPoints origin (list width 0))
+         bBox = (list origin (rodAddPoints origin (list (minus boxWX) boxWY)))                    
+         )
+        ((and (lessp spaceY 0) (geqp spaceX 0))
+         origin = (rodAddPoints origin (list 0 length) )
+         bBox = (list origin (rodAddPoints origin (list boxWX (minus boxWY))) )       
+         )      
+        ((and (lessp spaceX 0) (lessp spaceY 0))
+         origin = (rodAddPoints origin (list width length))
+         bBox = (list origin (rodAddPoints origin (list (minus boxWX) (minus boxWY))) )       
+         )
+        (t
+         bBox = (list origin (list (plus (car origin) boxWX) (plus (cadr origin) boxWY)))
+       
+         bBox) 
+        )    
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodAlign (@key
+                       (cvId  (importSkillVar pcCellView) )
+                       (refObj nil)
+                       (refHandle "lL")
+                       (alignObj nil)
+                       (alignHandle "lL")
+                       (refPoint nil)
+                       (xSep 0)
+                       (ySep 0)
+                       (maintain nil)                       
+                       (refRow nil)
+                       (refCol nil)
+                       (alignRow nil)
+                       (alignCol nil)
+                       
+                       )
+    (let (refPt mosaicName distX distY deltaX deltaY refCv alignCv refX refY alignX alignY box tmp )
+      refX = refY = alignX = alignY = 0
+    ;;  x = (rodGetObj alignObj cvId)
+     
+      (when refPoint
+        (unless (equal 2 (_pckRodGetlength refPoint)) (error (sprintf nil "pckRodAlign: refPoint %L can have only 2 elements\n" refPoint ))))
+      (when (equal (typep refObj) 'string)
+        tmp = refObj
+        refObj = (rodGetObj refObj cvId )
+        (unless refObj (error (sprintf nil "pckRodAlign: %L is not the name of a ROD object!\n" tmp)))
+        (when (and (_pckRodIsMosaic refObj) (rexMatchp "/" refObj~>name) )
+          mosaicName = (car (parseString refObj~>name "/"))
+          (unless refCol refCol = 1)
+          (unless refRow refRow = 1)
+          )
+        
+        )
+      
+     (when (equal (typep alignObj) 'string)
+        tmp = alignObj        
+        alignObj = (rodGetObj alignObj cvId )
+        (unless alignObj (error (sprintf nil "pckRodAlign: %L is not the name of a ROD object!\n" tmp)))
+        (when (and (_pckRodIsMosaic alignObj) (rexMatchp "/" alignObj~>name) )
+          
+          (unless alignCol alignCol = 1)
+          (unless alignRow alignRow = 1))
+        
+        )
+      ;; validate ref and align handles
+     (when refObj (unless (_pckRodCheckHandle refObj refHandle)
+                     (error (sprintf nil "pckRodAlign: refHandle %L is not a valid handle.\n   Valid handles are %L"
+                           refHandle (_pckRodValidHandles refObj)))))
+      (unless (_pckRodCheckHandle alignObj alignHandle)
+       (error (sprintf nil "pckRodAlign: alignHandle %L is not a valid handle.\n   Valid handles are %L"
+                           alignHandle (_pckRodValidHandles alignObj))))
+     
+      (cond
+        ((and (not (_pckRodIsMosaic refObj)) (not (_pckRodIsMosaic alignObj)))         
+         (if refPoint
+             (rodAlign  ?refPoint refPoint
+                        ?alignObj alignObj
+                        ?alignHandle alignHandle  
+                        ?xSep xSep 
+                        ?ySep ySep
+                        ?maintain maintain
+                        )
+          
+             (rodAlign  ?refObj refObj
+                        ?refHandle refHandle
+                        ?alignObj alignObj
+                        ?alignHandle alignHandle  
+                        ?xSep xSep 
+                        ?ySep ySep
+                        ?maintain maintain
+                        )
+             )
+         )
+        (t
+         (if refPoint
+             refPt = (rodAddPoints refPoint (list xSep ySep))
+             refPt = (rodAddPoints (pckRodPoint ?rodObj refObj ?cvId cvId ?row refRow ?col refCol ?handle refHandle)
+                               (list xSep ySep))
+             )
+         
+         
+         
+         
+         distX = (difference (car refPt) (pckRodPointX ?rodObj alignObj ?cvId cvId ?col alignCol ?handle alignHandle))
+         distY = (difference (cadr refPt) (pckRodPointY ?rodObj alignObj ?cvId cvId ?row alignRow ?handle alignHandle))
+          
+         ;; move mosaic by distX, distY
+         (if (_pckRodIsMosaic alignObj)
+             
+             (dbMoveFig (_pckRodIsMosaic alignObj)~>dbId cvId (list (list distX distY) "R0"))
+             (dbMoveFig alignObj~>dbId cvId (list (list distX distY) "R0"))
+             
+             )
+          
+         )
+        )
+      
+      ) ;;let
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetMosaicHandlePt (rodObj handle)
+      (let (box refX refY)
+        box = (_pckRodGetMosiacBbox rodObj)
+        refX = (car (_pckRodGetHandleOffset (car (trBBoxDims box)) (cadr (trBBoxDims box)) handle))
+        refY = (cadr (_pckRodGetHandleOffset (car (trBBoxDims box)) (cadr (trBBoxDims box)) handle))
+        (rodAddPoints (car box) (list refX refY))
+        
+        )
+      )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodGetDistX (@key
+                          (firstObj nil)
+                          (firstHandle "lL")
+                          (firstCol nil)
+                          (secondObj nil)
+                          (secondCol nil)
+                          (secondHandle "lL")
+                          (cvId (importSkillVar pcCellView))
+                          (absolute t)
+                          )
+    (let (x0 x1 )
+      
+      x0 = (pckRodPointX ?cvId cvId ?rodObj firstObj ?handle firstHandle ?col firstCol)
+      x1 = (pckRodPointX ?cvId cvId ?rodObj secondObj ?handle secondHandle ?col secondCol)
+      (if absolute
+          (abs (difference x1 x0))
+          (difference x1 x0)
+          )
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodGetDistY (@key
+                          (firstObj nil)
+                          (firstHandle "lL")
+                          (firstRow nil)
+                          (secondObj nil)
+                          (secondRow nil)
+                          (secondHandle "lL")
+                          (cvId (importSkillVar pcCellView))
+                          (absolute t)
+                          )
+    (let (y0 y1 )
+      y0 = (pckRodPointY ?cvId cvId ?rodObj firstObj ?handle firstHandle ?row firstRow)
+      y1 = (pckRodPointY ?cvId cvId ?rodObj secondObj ?handle secondHandle ?row secondRow)
+      (if absolute
+          (abs (difference y1 y0))
+          (difference y1 y0)
+          )
+      
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodPointX (@key
+                        (rodObj nil)
+                        (handle "lL")
+                        (col nil)
+                        (cvId (importSkillVar pcCellView))
+                        )
+    (let (box xOffset)
+      (when (equal (typep rodObj) 'string)
+         rodObj = (rodGetObj rodObj cvId ))
+      
+        (when (and (_pckRodIsMosaic rodObj) (rexMatchp "/" rodObj~>name) (not col)) col = 1)
+       
+      
+      (if col
+          (progn             
+            (plus (if (rexMatchp "/" rodObj~>name)  0 (car (_pckRodGetMosaicHandlePt rodObj "lL"))) 
+                  (rodPointX (pckSG rodObj handle))
+                  (times (difference col 1) (car (_pckRodGetMosaicDelta rodObj) )))
+           
+            )
+          (progn
+            (if (_pckRodIsMosaic rodObj)
+                (progn
+                  
+                  box = (_pckRodGetMosiacBbox rodObj)
+                  xOffset =(car (_pckRodGetHandleOffset (car (trBBoxDims box)) (cadr (trBBoxDims box)) handle))
+                  (plus (car (car box)) xOffset)
+                  )
+                (progn
+                  
+                  (car (pckSG rodObj handle))
+                  
+                  )
+                
+                )
+            
+            )
+          )           
+      )    
+    )
+
+    ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodPointY (@key
+                              (rodObj nil)
+                              (handle "lL")
+                              (row nil)
+                              (cvId (importSkillVar pcCellView))
+                              )
+    (let (box yOffset )
+      (when (equal (typep rodObj) 'string)        
+        rodObj = (rodGetObj rodObj cvId ))
+      (when (and (_pckRodIsMosaic rodObj) (rexMatchp "/" rodObj~>name) (not row)) row = 1)
+      (if row
+          (progn             
+            (plus (if (rexMatchp "/" rodObj~>name)  0 (cadr (_pckRodGetMosaicHandlePt rodObj "lL"))) 
+                  (rodPointY (pckSG rodObj handle))
+                  (times (difference row 1) (cadr (_pckRodGetMosaicDelta rodObj) )))
+           
+            )
+          (progn
+            (if (_pckRodIsMosaic rodObj)
+                (progn
+                  
+                  box = (_pckRodGetMosiacBbox rodObj)
+                  yOffset = (cadr (_pckRodGetHandleOffset (car (trBBoxDims box)) (cadr (trBBoxDims box)) handle))
+                  (plus (cadr (car box)) yOffset)
+                  )
+                (progn
+                  
+                  (cadr (pckSG rodObj handle))
+                  
+                  )
+                
+                )
+            
+            )
+          )           
+      )
+       
+   )
+
+   ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodPoint (@key
+                              (rodObj nil)
+                              (handle "lL")
+                              (row nil)
+                              (col nil)
+                              (cvId (importSkillVar pcCellView))
+                              )
+    (progn 
+      
+      (list (pckRodPointX ?rodObj rodObj ?col col ?handle handle ?cvId cvId )
+           (pckRodPointY ?rodObj rodObj ?row row ?handle handle ?cvId cvId ) )
+                 
+      )
+   )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodGetMosaicDelta (rodObj )
+    (let (dbObj )
+      (setq dbObj (_pckRodUpHierToMosaicInst rodObj))
+      (list dbObj~>dbId~>uX dbObj~>dbId~>uY)
+      )
+    
+    )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodGetMosiacBbox (rodObj)
+    (let (dbObj)
+      (setq dbObj (_pckRodUpHierToMosaicInst rodObj))
+      ;; (fprintf stdout "objCv = %L\n" objCv~>??)
+      dbObj~>dbId~>bBox
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  (defun _pckRodIsMosaic (rodObj)
+    (let (dbObj)
+      
+      (setq dbObj (_pckRodUpHierToMosaicInst rodObj))
+      ;; (fprintf stdout "dbObj = %L\n" dbObj~>dbId~>objType)
+      (if (equal dbObj~>dbId~>objType "mosaic" ) dbObj nil )
+      
+      )
+    )
+ 
+   ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+   (defun _pckRodUpHierToMosaicInst (rodObj)
+    (let (rodName cv)
+      
+      
+      (unless (or (equal rodObj~>dbId~>objType "mosaic") (not rodObj)) 
+        (setq cv rodObj~>cvId)
+        (setq rodName rodObj~>name)
+          
+        (setq rodName (parseString rodName "/"))
+        (setq rodName (buildString
+                       (reverse (cdr (reverse rodName)))
+                       "/"))
+         (setq rodObj (rodGetObj rodName cv))
+        )
+      
+      ;; (fprintf stdout "rodObjType = %L\n" rodObj~>dbId~>objType )
+      ;; (fprintf stdout "rodObName = %L\n" rodObj~>name )
+      rodObj
+      )
+
+      )
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+  
+
+
+  (defun _pckGetSortedShapeList (shapeList fillBBox)
+  
+    (let (assocList myList)
+      ;; (fprintf stdout "shapeList2 = %L\n" shapeList)
+      assocList = (list )
+      (foreach shape shapeList assocList = (cons (list shape~>bBox shape) assocList))
+      (cond
+        ((and (leqp (car (car fillBBox)) (car (cadr fillBBox))) (leqp (cadr (car fillBBox)) (cadr (cadr fillBBox))))
+         myList = (_pckRodSortBBox (_pckRodSortBBox shapeList~>bBox "X") "Y"))
+        ((and (leqp (car (cadr fillBBox)) (car (car fillBBox))) (leqp (cadr (cadr fillBBox)) (cadr (car fillBBox))))
+         myList = (_pckRodSortBBox (_pckRodSortBBox shapeList~>bBox "-X") "-Y"))
+        ((and (leqp (car (car fillBBox)) (car (cadr fillBBox))) (leqp (cadr (cadr fillBBox)) (cadr (car fillBBox))))
+         myList = (_pckRodSortBBox (_pckRodSortBBox shapeList~>bBox "X") "-Y"))
+        ((and (leqp (car (cadr fillBBox)) (car (car fillBBox))) (leqp (cadr (car fillBBox)) (cadr (cadr fillBBox))))
+         myList = (_pckRodSortBBox (_pckRodSortBBox shapeList~>bBox "-X") "Y"))
+        )
+      shapeList = (list )
+      (foreach bBox myList shapeList = (cons (cadr (assoc bBox assocList)) shapeList))
+      shapeList = (reverse shapeList)
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodNameShapes (shapeList name)
+    (let (k newShapeList)
+      newShapeList = (list )
+      k = 0      
+         (for i 1 (cadr (_pckRodGetRowCol shapeList))
+           (for j 1 (car (_pckRodGetRowCol shapeList))
+                newShapeList = (cons (rodNameShape ?name (get_pname (concat name "." i "." j )) ?shapeId (nth k shapeList)) newShapeList)                 
+                 ++k))
+         newShapeList
+      )
+    )
+
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckGetShapesBBox (shapes)
+    (let (x0 x1 y0 y1 x)
+      x = (car shapes)~>bBox
+      x0 = (car (car x))
+      x1 = (car (cadr x))
+      y0 = (cadr (car x))
+      y1 = (cadr (cadr x))
+      shapes = (cdr shapes)
+      (foreach box shapes~>bBox
+               (when (car (car box)) < x0 x0 = (car (car box)))
+               (when (car (cadr box)) > x1 x1 = (car (cadr box)))
+               (when (cadr (car box)) < y0 y0 = (cadr (car box)))
+               (when (cadr (cadr box)) > y1 y1 = (cadr (cadr box)))
+               )
+      (list (list x0 y0) (list x1 y1))
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodSortBBox (pointList dir)
+    (cond
+      ((equal dir "X")
+       (sort pointList 'pckSortBBoxRowX)
+       )
+      ((equal dir "-X")
+       (sort pointList 'pckSortBBoxRowXrev)
+       )
+      ((equal dir "Y")
+       (sort pointList 'pckSortBBoxRowY)
+       )
+      ((equal dir "-Y")
+       (sort pointList 'pckSortBBoxRowYrev)
+       )
+    
+      )
+    )
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+  (defun _pckRodGetObj (rodName cvId)
+	(if (rodGetObj rodName cvId)
+	  (rodGetObj rodName cvId)
+	  (progn
+		(pckWarn "pckRodGetObj" (sprintf nil "ROD object not found: %L" rodName))
+		nil)))
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+
+   (setq pckRodCreateRect _pckRodCreateRect)
+
+  (setq pckRodAlign _pckRodAlign )
+
+  (setq pckGetShapesBBox _pckGetShapesBBox)
+
+  (setq pckRodGetDistX _pckRodGetDistX)
+  (setq pckRodGetDistY _pckRodGetDistY)
+  (setq pckRodPointX _pckRodPointX)
+  (setq pckRodPointY _pckRodPointY)
+  (setq pckRodPoint _pckRodPoint)
+  (setq pckRodGetLppList _pckRodGetLppList)
+  (setq pckRodGetObj _pckRodGetObj)
+
+  ;;**********************************************************************************************************
+  ;;**********************************************************************************************************
+   );;let

@@ -1,0 +1,167 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# ******************************************************************************
+#
+#/******************************************************************************
+# * Filename: rideGenerateSkews
+# * Overview: Logic to generate inductor skews in a more automated way
+# * Date:     Q3, 2007 - Original coding
+# *           Q2, 2008 - Changes for temperature dependent macro-models
+# ******************************************************************************
+
+use strict;
+use File::Find;
+use File::Basename;
+use Cwd;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+my $release = "/usr/tcad/RFDesigner/ride/latest";
+# With version 1.3.6, it is no longer to explicitly set this.
+my $stackrun = "";
+
+$| = 1;
+
+my %optctl;
+# With 1.3.6, we have a default for permittivity, which is reflected here.
+$optctl{dummy} = 1.3;
+
+&GetOptions(\%optctl, 'help', 'verbose', 'upf=s', 'vias=s', 'postedit=s', 'cells=i',
+                      'inds=s', 'ride=s', 'execute', 'temp=s', 'stackrun=s', 'dummy=f');
+
+if ($#ARGV != 0 || exists $optctl{"help"}) {
+  print "Usage: rideGenerateSkews [options] <output directory>\n",
+        "Options: [-help|-h]           This info\n",
+        "         [-upf upfname]       Provide upf (MANDATORY)\n",
+        "         [-inds inductors]    Specify ind directory (MANDATORY)\n",
+        "         [-vias vialine]      Provide via areas\n",
+        "         [-ride ride_path]    Specify RIDE to use\n",
+        "         [-execute]           Execute all RIDE runs\n",
+        "         [-postedit script]   Specify post-edit script\n",
+        "         [-stackrun path]     Stackrun path\n",
+        "         [-cells #]           Cells per wavelength\n",
+        "         [-dummy #]           Permittivity dummification factor\n",
+        "         [-temp #,#,#]        Specify temperatures\n";
+  exit(1);
+}
+
+my $cells = defined $optctl{cells} ? $optctl{cells} : 900;
+
+die "ERROR: $ARGV[0] already exists.\n" if (-d $ARGV[0] || -e $ARGV[0]);
+
+if (defined $optctl{stackrun}) {
+  $stackrun = "STACKRUNPATH=$optctl{stackrun}";
+}
+
+my $ride = defined $optctl{ride} ? $optctl{ride} : "/usr/tcad/RFDesigner/ride/ride";
+defined $optctl{inds} or die "Error: Inductor directory must be input; see -h.\n";
+my $inds = $optctl{inds};
+-d $inds or die "Error: Inductor directory \"$inds\" does not exist.\n";
+my @inductors = glob "$inds/*.ind";
+$#inductors >= 0 or die "Error: \"$inds\" does not contain any inductor files.\n";
+
+my $postedit = defined $optctl{postedit} ?
+                       $optctl{postedit} : "$release/scripts/ridePostEditGeo";
+
+defined $optctl{upf} or die "ERROR: UPF option is required; see -h.\n";
+my $upf = $optctl{upf};
+-e $upf or die "ERROR: Cannot open $upf.\n";
+
+my $vias = defined $optctl{vias} ? $optctl{vias} :
+  "400 8 0.053824 0.030276 0.0269 0.015 0.007 0.011 0.011 0.01";
+
+my $tag = basename $upf;
+$tag =~ s/\.upf$//;
+
+print "POSTEDIT: $postedit\n",
+      "RIDE: $ride\n";
+
+mkdir $ARGV[0] or die "ERROR: Cannot mkdir $ARGV[0].\n";
+chdir $ARGV[0] or die "ERROR: Cannot chdir $ARGV[0].\n";
+
+(mkdir "process" and chdir "process") or die "ERROR: Cannot create \"process\".\n";
+
+my $extra = "";
+$extra = "_epsrX$optctl{dummy}";
+$extra =~ s/\./p/g;
+
+my @cases = ("typical$extra", "lowQ$extra", "highQ$extra");
+my %skews = ($cases[0] => "tttt", $cases[1] => "low", $cases[2] => "high");
+my @temps = (25, 110);
+
+if (defined $optctl{temp}) {
+  @temps = split ',', $optctl{temp};
+}
+
+symlink "$release/scripts/rideMergeStacks", "rideMergeStacks";
+foreach my $temp (@temps)
+{
+  foreach my $case (@cases)
+  {
+    my $filename = "$tag\_$case\_t$temp.ride";
+    open OUT, "> $filename" or die "ERROR: Cannot open $filename.\n";
+    print OUT <<EOF;
+MODE = CTP_GENERATOR
+PROCESS = $upf
+SKEW = $skews{$case}
+VIA_AREAS = $vias
+TEMP = $temp
+EOF
+    print OUT "DUMMIFICATION_FACTOR = $optctl{dummy}\n";
+    close OUT;
+    !system "$stackrun $ride $filename | /bin/sed -ne '/\.ctp/p'"
+      or die "Error: CTP generation failed.\n";
+  }
+}
+
+(chdir ".." and mkdir "runs" and chdir "runs") or die "ERROR: Cannot create \"runs\".\n";
+
+symlink "$postedit", "ridePostEditGeo";
+symlink "$release/scripts/rideIE3DWrapper", "rideIE3DWrapper";
+
+foreach my $temp (@temps)
+{
+  foreach my $case (@cases)
+  {
+    my $filename = "$tag\_$case\_t$temp\_run.ride";
+    open OUT, "> $filename" or die "ERROR: Cannot open $filename.\n";
+    print OUT <<EOF;
+MODE = ANALYTIC_OPTIM
+PROCESS = ../process/$tag\_$case\_t$temp.ctp
+EOF
+    print OUT "INDUCTOR_COUNT = ", ($#inductors + 1), "\n";
+    foreach my $ind (@inductors)
+    {
+      my $ind_ = basename $ind;
+      $ind_ =~ s/\.ind$//;
+      $ind_ .= "_$case\_t$temp";
+      $ind_ .= ".ind";
+      symlink "$ind", "$ind_";
+      print OUT "$ind_\n";
+    }
+    print OUT <<EOF;
+GROW_LAYERS = 1
+OPTIMIZE = BOTH
+CELLS_PER_WAVELENGTH = $cells
+MIN_GRID = 0.01
+FREQUENCY_RANGE = 0.5:0.5:40
+SOLVER = rideIE3DWrapper
+EOF
+    close OUT;
+    if ($optctl{execute}) {
+      print "Executing $filename...\n";
+      !system "$ride $filename > /dev/null"
+        or die "Error: RIDE run failed.\n";
+    }
+  }
+}

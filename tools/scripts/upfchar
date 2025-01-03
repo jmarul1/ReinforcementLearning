@@ -1,0 +1,1472 @@
+#!/usr/intel/bin/perl
+
+## Programmer: Skyler Weaver
+## Date:       February 2012
+## Purpose:    Characterizes UPF by metrics defined in the modules
+## Usage:      upfchar <module_name> [<UPF_file>,[<UPF_file>,[...]]] 
+
+$info_upf = "\nCorrect syntax for upfchar is:
+   \"upfchar module_name [upf_file,[upf_file],[upf_file],[...]] [force_simulate]\"\n
+If no UPF is specified, the default for your environment is used.\n";
+$info_module = "\nThe currently availiable modules are:\n
+   skewmap - creates skewmaps for NMOS and PMOS devices for fT and Vt\n
+   analog - plots analog metrics (i.e. gm, ro, etc...) for all MOS devices\n
+   varactor - plots useful metrics (i.e. Q, flatband V...) for the varactor\n
+   interconnect - plots of R/um and C/um of metal layers\n
+   gatedelay - plots inverter delays for FO1-4 at different skews\n
+   rv - plots DC current design rules for backend metals\n\n";
+
+use File::Path;
+use File::Copy;
+use File::Copy::Recursive qw(dircopy);
+
+# Grab environment variables
+$0 = "upfchar";
+$env_upf = $ENV{PROJECT_UPF_FILE};
+$whoami = `whoami`;
+chomp($whoami);
+my $date = `date`;
+
+$master_dir = "/nfs/pdx/disks/upfchar.disk.001/upfchar/lib/";
+if (-r "/nfs/pdx/disks/tcad_ptm_pdmg_work_29/upftools/upfscripts/upfparamconfig/config/p1274.dat") {
+    $analog_config_dir = "/nfs/pdx/disks/tcad_ptm_pdmg_work_29/upftools/upfscripts/upfparamconfig/config/";
+    if ($whoami eq "sweaver") {
+        system("cp -rf /nfs/pdx/disks/tcad_ptm_pdmg_work_29/upftools/upfscripts/upfparamconfig/config/* /nfs/pdx/disks/upfchar.disk.001/upfchar/lib/config");
+        system("chgrp -R users /nfs/pdx/disks/upfchar.disk.001/upfchar/lib/config");
+        system("chmod -R 775 /nfs/pdx/disks/upfchar.disk.001/upfchar/lib/config");
+    }
+} else {
+    $analog_config_dir = "/nfs/pdx/disks/upfchar.disk.001/upfchar/lib/config/";
+}
+
+require $master_dir . "upfchar_plot_gui" or die("GUI LOAD ERROR!\n");
+require $master_dir . "upfchar_version" or die("VERSION LOAD ERROR!\n");
+
+@modules = ("skewmap","analog","analog_nb","varactor","interconnect","gatedelay","rv","rv_short","nesttest","nesttest_nb");
+$version = "0.95";
+$master_master_dir = $master_dir;
+$pwd = `pwd`;
+chomp($pwd);
+
+# Print Logo
+system("clear");
+print "\n" . '              __      _  Version '.$version.'   ' . "\n" . ' _   _ _ __  / _| ___| |__   __ _ _ __ ' . "\n" . '| | | | \'_ \| |_ / __| \'_ \ / _` | \'__|' . "\n" . '| |_| | |_) |  _| (__| | | | (_| | |   ' . "\n" . ' \__,_| .__/|_|  \___|_| |_|\__,_|_|   ' . "\n" . '      |_|   PTD Advanced Design           ' . "\n\n";
+
+
+# Check for current version
+#open VERSION, "<" . $master_master_dir . "upfchar_version";
+#@upfchar_ver = <VERSION>;
+#close(VERSION);
+#chomp(@upfchar_ver);
+if ($newver ne $version) {
+   die "There is a new version of upfchar. Yay!\nThis version: $version   New version: $newver\nPath: ".$newver_path."upfchar\n\nPlease get the new version and re-run. Thanks.\n";
+}
+
+
+#$local_dir=$ENV{WORK};
+$local_dir=$pwd;
+chomp($local_dir);
+
+# Make sure module is specified and it exists.
+$module_to_run = lc($ARGV[0]); # converts argument to lowercase
+$module_is_not_valid = 1;
+foreach (@modules) {
+    if ($_ eq $module_to_run) {
+        $module_is_not_valid = 0;
+    }
+}
+if ($module_is_not_valid) {
+    if ((-e $pwd."/$module_to_run")&&($ARGV[0] ne "")) {
+        $master_dir=$pwd."/";
+    } else {
+        die "A valid module name must be specified.\n" . $info_upf . $info_module;
+    }
+}
+
+# Grab all of the UPFs to run
+$i=0;
+$force_simulate = 0;
+$keep_db = 0;
+$no_gui = 0;
+$standard_graphs = 0;
+$graph_file = 0;
+$crunch_the_numbers = 0;
+$results_dir = $master_dir;
+foreach (@ARGV) {
+    if ($i>0) { #ignore first argument
+        if ($_ =~ m/force_simulate/i) {
+            $force_simulate = 1;
+            print "upfchar: FORCING SIMULATION\n";
+        } elsif ($_ =~ m/keep_db/i) {
+            $keep_db=1;
+        } elsif ($_ =~ m/no_gui/i) {
+            $no_gui=1;
+        } elsif ($_ =~ m/standard_graphs/i) {
+            $standard_graphs=1;
+        } elsif ($_ =~ m/graph_file/i) {
+            $graph_file=1;
+        } elsif ($_ =~ m/generate_report/i) {
+            $crunch_the_numbers=1;
+        } elsif ($_ =~ m/results=(.*)/i) {
+            $results_dir=`realpath $1`;
+            chomp($results_dir);
+            $results_dir .= "/";
+        } else {
+            $upf_to_run = `realpath $_`;
+            chomp($upf_to_run);
+            open UPF, "<" . $upf_to_run or die $upf_to_run."\nThat UPF file is not readable.\n" . $info_upf;
+            close(UPF);
+            push (@upfs_to_run,$upf_to_run);      
+        }
+    }
+    $i++;
+}
+
+# Get UPF file, or default if none is specified.
+if (scalar(@upfs_to_run)==0) {
+    # If not in an evironment, die!
+    if ($env_upf eq "") {
+        die "You don't seem to be in an environment.\nEnter an environment and try again, sorry.\n";
+    }
+    @upfs_to_run = $env_upf;
+}
+
+# Print the UPF names in a human-readable way
+# TODO: Change to reading the first line of UPF to get name!
+foreach $upf_to_run (@upfs_to_run) {
+    #try {
+    open UPF, "<" . $upf_to_run or die $upf_to_run."\nThat UPF file is not readable.\n" . $info_upf;
+    @upf_file=`cat $upf_to_run | grep "+++"`;
+    close(UPF);
+
+# Parse the UPF
+    $got_the_rev_name = 0;
+    foreach (@upf_file) {
+        chomp;
+        if ($_ =~ m/\+\+\+([a-z]+).*process.*"(.*)".*revision.*"(.*)".*format/i) {
+            if ($got_the_rev_name == 0) {
+                $process_family = $2;
+                $process_rev = $3;
+                $got_the_rev_name = 1;
+            }
+        }   
+    }
+    $process_family =~ m/[^0-9]*([0-9]+)\./;
+    $process_group = $1;
+    undef @upf_file; #We don't need this anymore, free memory.
+
+    $_ =~ m!.*p([0-9]+).*/([^/]*)/[^/]*\.upf!;
+    #print "upfchar: UPF = $1.$2\n";
+    #push (@upf_names,"$1.$2");
+    #}
+    my $short_name = "$process_family"."$process_rev";
+    #if (grep(/^$short_name$/, @upf_names_for_log)) {
+    # push (@upf_names_for_log,"$short_name"."_".$uniquify++);
+    #} else {
+    push (@upf_names_for_log,"$short_name");
+    #}
+}
+
+open USELOG, ">>" . $master_master_dir . "/results/upfchar.uselog";
+chomp($date);
+print USELOG "$date $whoami $module_to_run @upf_names_for_log\n";
+close(USELOG);
+
+# This setion checks if this has been run before and for access
+mkdir $results_dir."results";
+open PREVIOUS_RUNS, "<" . $results_dir . "/results/upfchar.runs";
+@runs_file=<PREVIOUS_RUNS>;
+close(PREVIOUS_RUNS);
+
+$module_file_to_run = $master_dir . $module_to_run;
+if ($master_dir eq $master_master_dir) {
+    $hash_of_module = `md5sum $module_file_to_run`; # Get the hash of the module file for lookup
+    $hash_of_module = substr($hash_of_module,0,32); # Grab just the hash
+    $hash_of_module = $module_to_run; ###################### DEBUG FEATURE ###################################
+    if ($module_to_run eq "analog_nb") {
+        $hash_of_module = "analog";
+    }
+} else {
+    $hash_of_module = $module_to_run;
+    if ($module_to_run eq "analog_nb") {
+        $hash_of_module = "analog";
+    }
+}
+#$user_groups = `groups`;
+
+$i=0;
+my $uniquify = 0;
+foreach $upf_to_run (@upfs_to_run) {
+    open UPF, "<" . $upf_to_run or die $upf_to_run."\nThat UPF file is not readable.\n" . $info_upf;
+    @upf_file=`cat $upf_to_run | grep "+++"`;
+    close(UPF);
+
+# Parse the UPF
+    $got_the_rev_name = 0;
+    foreach (@upf_file) {
+        chomp;
+        if ($_ =~ m/\+\+\+([a-z]+).*process.*"(.*)".*revision.*"(.*)".*format/i) {
+            if ($got_the_rev_name == 0) {
+                $process_family = $2;
+                $process_rev = $3;
+                $got_the_rev_name = 1;
+            }
+        }   
+    }
+    $process_family =~ m/[^0-9]*([0-9]+)\./;
+    $process_group = $1;
+    undef @upf_file; #We don't need this anymore, free memory.
+    my $short_name = "$process_family"."$process_rev";
+    if (grep(/^$short_name$/, @upf_names)) {
+        $upf_names[$i] = "$short_name"."_".$uniquify++; #ww7 2016
+    } else {
+        $upf_names[$i] = "$short_name"; #ww7 2016
+    }
+
+    if ($master_dir eq $master_master_dir) {
+        $hash_of_upf = `md5sum $upf_to_run`; # Get the hash of the UPF file for lookup
+        $hash_of_upf = substr($hash_of_upf,0,32); # Grab just the hash
+    } else {
+        $hash_of_upf = $process_family.$process_rev;
+        $hash_of_upf =~ s/\./_/gi;
+    }
+
+#save these things
+    $hashes_of_upfs[$i]=$hash_of_upf;
+    $upf_ids[$i]=$process_family.$process_rev;
+
+    $has_been_run = 0;
+    foreach (@runs_file) { #scan runs file for this particular run
+        $_ =~ m/([^ ]+) ([^ ]+)/;
+        if (($1 eq $hash_of_upf) & ($2 eq $hash_of_module)) {
+            $has_been_run = 1;
+        }
+    }
+
+    if (($has_been_run == 0)||($force_simulate == 1)) {
+        print "upfchar: $upf_names[$i] for $module_to_run has not been simulated.\n";
+        push (@upfs_to_simulate,$upf_to_run);
+    } else {
+        print "upfchar: $upf_names[$i] for $module_to_run has been simulated.\n";
+    }
+    $i++;
+}
+$num_upfs = $i;
+
+#print "SIMULATION OVERRIDE!!!\n"; ####################################################################
+#undef @upfs_to_simulate;##############################################################################
+if (@upfs_to_simulate > 0) {
+    print "\nupfchar: " . $module_to_run . " has not been simulated on all UPFs\n";
+    print "\n   Do you want to launch the simulations? (will take time)\n   >";
+    if ($no_gui) {
+        $user_input = "y";
+    } else {
+        $user_input = <STDIN>;
+    }
+    if (lc($user_input) !~ m/y/) {
+        die ("\nupfchar: Exiting ...\n");
+    }
+}
+
+# Launching Module:
+system("banner $module_to_run");
+require $master_dir . $module_to_run or die("MODULE ERROR!\n");
+
+# Simulate unsimulated UPFs
+foreach $upf_to_run (@upfs_to_simulate) {
+    $supernest=0;
+
+    open UPF, "<" . $upf_to_run or die $upf_to_run."\nThat UPF file is not readable.\n" . $info_upf;
+    @upf_file=<UPF>;
+    close(UPF);
+
+# Parse the UPF
+    $got_the_rev_name = 0;
+    foreach (@upf_file) {
+        chomp;
+        # Dynamically grab all of the skews
+        if ($_ =~ m/\+\+\+([a-z0-9]+).*process.*"(.*)".*revision.*"(.*)".*format/i) {
+            push (@skews,$1);
+            if ($got_the_rev_name == 0) {
+                $process_family = $2;
+                $process_rev = $3;
+                $got_the_rev_name = 1;
+            }
+        }
+        # Dynamically grab all of the PMOS models
+        if ($_ =~ m/model *= *"(.+)".*"pmos/i) {
+            if (grep {$_ eq $1} @pmos) {
+            } else {
+                push (@pmos,$1);
+            }
+        }
+        # Dynamically grab all of the NMOS models
+        if ($_ =~ m/model *= *"(.+)".*"nmos/i) {
+            if (grep {$_ eq $1} @nmos) {
+            } else {
+                push (@nmos,$1);
+            }
+        }
+        if ($_ =~ m/supernest *= *([0-9.]+)/i) {
+            $supernest = $1;
+        }
+    }
+    $process_family =~ m/.*([0-9]{4}).*/;
+    $process_lookup = $1; # for find/replace in the module
+    undef @upf_file; #We don't need this anymore, free memory.
+
+    $upf_to_run =~ m/(.*)\/([^\/]*)\/([a-z|0-9|_]+)\.upf/;
+    $techfile_dir = "$1/../pv_tech/$2/";
+
+    if ($master_dir eq $master_master_dir) {
+        $hash_of_upf = `md5sum $upf_to_run`; # Get the hash of the UPF file for lookup
+        $hash_of_upf = substr($hash_of_upf,0,32); # Grab just the hash
+    } else {
+        $hash_of_upf = $process_family.$process_rev;
+        $hash_of_upf =~ s/\./_/gi;
+    }
+    print "upfchar: UPF to simulate is: " . $process_family . " - " . $process_rev . "\n";
+#print "NMOS = ".join(",",@nmos)."\n";
+#print "PMOS = ".join(",",@pmos)."\n";
+#print "SKEW = ".join(",",@skews)."\n";
+
+
+    print("Initializing..."); #####################################################
+
+    init_replace(); # Needed for UPF loop, must happen after @skews is defined and before the find/replace
+
+    # Make a temporary directory to put stuff
+    $working_dir = "/tmp/" . $whoami . "/upfchar/$module_to_run/";
+    rmtree($working_dir,0,1);
+    mkdir "/tmp/$whoami";
+    mkdir "/tmp/$whoami/upfchar";
+    mkdir $working_dir;
+
+    # Run find/replace on prs file
+    foreach $file_to_modify (@files_to_modify) {
+        open COPYFROM, "<" . $master_dir . $file_to_modify;
+        my @tempdata=<COPYFROM>;
+        close(COPYFROM);
+        open COPYTO, ">" . $working_dir . $file_to_modify;
+        print COPYTO @tempdata;
+        close(COPYTO);      
+        find_replace($file_to_modify,\@replace_terms,$process_lookup);
+}
+initialize($working_dir,$techfile_dir,$upf_to_run);
+
+print("Done.\n"); #Initializing #####################################################
+print("Running simulations..."); ####################################################
+
+run_simulation($working_dir);
+
+print("Done.\n"); #Running Presto #####################################################
+print("Processing results..."); #####################################################
+
+undef @module_output_files;
+process_results($working_dir,\@module_output_files);
+
+   foreach (@module_output_files) {
+       system("gzip -q $working_dir$_");
+       mkdir "$results_dir"."results/$hash_of_upf$hash_of_module";
+       system("cp -f $working_dir$_.gz $results_dir"."results/$hash_of_upf$hash_of_module/$_.gz");
+   }
+   system("chgrp -R users $results_dir"."results/$hash_of_upf$hash_of_module");
+   system("chmod -R 775 $results_dir"."results/$hash_of_upf$hash_of_module");
+
+   print("Done.\n\n"); #Processing results #####################################################
+
+# Erase stuff so we can simulate the next UPF
+   rmtree($working_dir,0,1);
+
+#   push (@runs_file,$hash_of_upf . " " . $hash_of_module . " " . $process_family . "." . $process_rev . " " . $module_to_run);
+   open PREVIOUS_RUNS, ">>" . $results_dir . "/results/upfchar.runs";
+#   foreach (@runs_file) {
+#      chomp;
+   print PREVIOUS_RUNS $hash_of_upf . " " . $hash_of_module . " " . $process_family . "." . $process_rev . " " . $module_to_run ." \n";
+#   }
+   close(PREVIOUS_RUNS);
+
+   undef @skews;
+   undef @pmos;
+   undef @nmos;
+}
+
+print("Merging databases..."); #####################################################
+
+#mkdir "$local_dir/upfchar";
+#mkdir "$local_dir/upfchar/$module_to_run";
+$local_output_dir = "$local_dir/upfchar/$module_to_run/";
+chomp($now);
+if ($num_upfs < 7) {
+    chomp($upfs_to_run);
+    $local_output_dir = $local_output_dir . join("_",@upf_names);
+} else {
+    $local_output_dir = $local_output_dir . $num_upfs . "upfs";
+}
+rmtree($local_output_dir,0,1);
+#mkdir $local_output_dir;
+
+$working_dir = "/tmp/" . $whoami . "/upfchar/$module_to_run/";
+rmtree($working_dir,0,1);
+mkdir "/tmp/$whoami";
+mkdir "/tmp/$whoami/upfchar";
+mkdir $working_dir;
+my @module_output_files = `ls -1 $results_dir./results/$hashes_of_upfs[0]$hash_of_module/`;
+chomp(@module_output_files);
+chop(@module_output_files);
+chop(@module_output_files);
+chop(@module_output_files);
+
+for ($upf_num=0;$upf_num<$num_upfs;$upf_num++) {
+    foreach (@module_output_files) {
+        system("cp -f $results_dir"."results/$hashes_of_upfs[$upf_num]$hash_of_module/$_.gz $working_dir$_.gz");
+        system("gunzip -qf $working_dir$_.gz");
+        db_merge($_."merged",$_,"upf",$upf_names[$upf_num]);
+        print ".";
+    }
+}
+print("Done.\nGenerating GUI..."); #####################################################
+
+#print ".";
+#make_index_header();
+#generate_graphs($working_dir);
+#make_index_footer();
+%gui_values;
+init_gui_values();
+
+mkdir $working_dir."common";
+dircopy("$master_master_dir"."common",$working_dir."common");
+
+print("Done.\nGenerating graphs");
+
+if (1 - $standard_graphs) {
+    if (1 - $no_gui) {
+        launch_gui(); # only launch GUI if no_gui=0 and standard_graphs=0
+    }
+} else {
+    if (exists &standard_graphs) {
+        standard_graphs();
+    } else {
+        print("\nThere are no standard graphs listed for $module_to_run\n");
+    }
+}
+
+if ($crunch_the_numbers) {
+    if (exists &crunch_the_numbers) {
+        crunch_the_numbers();
+    } else {
+        print("\nThere is not report defined for $module_to_run\n");
+    }
+}
+
+
+print("Done.\nCleaning up...");
+#copy files
+
+#@files_to_copy = `ls -1 $working_dir`;
+#foreach (@files_to_copy) {
+#   chomp;
+#   if ($_ =~ m/\.csv|\.html/i) {
+#      system("cp -f $working_dir"."$_ $local_output_dir/$_");
+#   }
+#}
+#   mkdir "$local_dir/upfchar/common";
+#   dircopy("$master_master_dir"."common","$local_dir/upfchar/common");
+
+if ($keep_db > 0) {
+
+   foreach (@module_output_files) { 
+system("cp -f $working_dir".$_."merged ".$_."merged");
+}
+print("\nSaving merged .db file...Done\n");
+}
+
+#rmtree($working_dir,0,1);
+
+print("Done.\n"); #Generating graphs #####################################################
+
+#print("Launching Firefox..."); #####################################################
+#system("firefox $local_output_dir/index.html &");
+#print("Done."); #####################################################
+
+print "\nupfchar: Normal exit. Have a nice day.\n";
+
+
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+##############END######################
+
+sub find_replace {
+   my $file_to_modify = $working_dir.$_[0];
+   my @replace_terms = @{$_[1]};
+   my $lookup = $_[2];
+   
+      chomp($file_to_modify);
+      open THIS_FILE, "<" . $file_to_modify;
+      @this_file=<THIS_FILE>;
+      close(THIS_FILE);
+      my @that_file;
+      open THAT_FILE, ">" . $file_to_modify;
+      foreach $this_file_line (@this_file) {
+         chomp;
+         foreach $replace_term (@replace_terms) {
+         #print $replace_term;
+            $replace_term =~ m/<(.*)>.*;$lookup,([^;]*);/;
+            #print "$1 $2\n";
+            my $find = $1;
+            my $replace = $2;
+            #print "$replace\n";
+            $this_file_line =~ s/$find/$replace/gi;
+         }
+      print THAT_FILE "$this_file_line";
+      }
+      close(THAT_FILE);
+}
+
+# prep_prs_file(prs_file.prs,measurement_output.csv)
+sub prep_prs_file {
+
+   open PRS_FILE, "<" . $working_dir . $_[0];
+   @prs_file=<PRS_FILE>;
+   close(PRS_FILE);
+   
+   my $prs_vcc = 'vcc';
+   my $prs_temp = 'temp';
+   
+   foreach (@prs_file) {
+      if (($prs_vcc eq 'vcc')||($prs_temp eq 'temp')) {
+      if ($_ =~ m/^set_setup.* vcc/i) {
+         $prs_vcc = $_;
+      } elsif ($_ =~ m/^set_setup.* temp/i) {
+         $prs_temp = $_;
+      }
+      }
+   }
+      
+   # append to the end
+   system("setenv PROJECT_UPF_FILE $upf_to_run");
+   push (@prs_file,"\nset_setup -type String -value ".$upf_to_run." upf\n");
+   
+   # find tech_file in tree and append to prs file
+   if(`find $techfile_dir | grep -c "\\.tech"` > 0) {
+      @tech_files = `find $techfile_dir | grep "\\.tech"`;
+      $tech_file = @tech_files[0];
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+      system("setenv PROJECT_TECH_FILE $tech_file");
+   }
+   elsif(`find $techfile_dir../ | grep -c "\\.tech"` > 0) {
+      @tech_files = `find $techfile_dir../ | grep "\\.tech"`;
+      $tech_file = @tech_files[0];
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+      system("setenv PROJECT_TECH_FILE $tech_file");
+   }
+   else {
+      print "\nupfchar: No techfile found. Using default...";
+      $tech_file = `echo \$PROJECT_TECH_FILE`;
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+   }
+   
+   #change work area
+   mkdir $working_dir."presto";
+   push (@prs_file,"\nset_setup -value ".$working_dir."presto Work_Area\n");
+   
+   # Reload vcc and temp, these were overwritten by loading the techfile
+   push (@prs_file,"\n$prs_vcc\n$prs_temp\n");   
+   
+   #automatically simulate and dump data to data.csv
+   push (@prs_file,"\nsimulate\nexport_measurement -file ".$working_dir.$_[1]." -regexp .*\nexit\n");
+   
+   #write prs file
+   open PRS_FILE, ">" . $working_dir.$_[0];
+   print PRS_FILE @prs_file;
+   close(PRS_FILE);
+
+}
+
+sub prep_prs_file_custom {
+
+   open PRS_FILE, "<" . $working_dir . $_[0];
+   @prs_file=<PRS_FILE>;
+   close(PRS_FILE);
+   
+   my $prs_vcc = 'vcc';
+   my $prs_temp = 'temp';
+   
+   foreach (@prs_file) {
+      if (($prs_vcc eq 'vcc')||($prs_temp eq 'temp')) {
+      if ($_ =~ m/^set_setup.* vcc/i) {
+         $prs_vcc = $_;
+      } elsif ($_ =~ m/^set_setup.* temp/i) {
+         $prs_temp = $_;
+      }
+      }
+   }
+   
+   # append to the end
+   system("setenv PROJECT_UPF_FILE $upf_to_run");
+   push (@prs_file,"\nset_setup -type String -value ".$upf_to_run." upf\n");
+   
+   # find tech_file in tree and append to prs file
+   if(`find $techfile_dir | grep -c "\\.tech"` > 0) {
+      @tech_files = `find $techfile_dir | grep "\\.tech"`;
+      $tech_file = @tech_files[0];
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+      system("setenv PROJECT_TECH_FILE $tech_file");
+   }
+   elsif(`find $techfile_dir../ | grep -c "\\.tech"` > 0) {
+      @tech_files = `find $techfile_dir../ | grep "\\.tech"`;
+      $tech_file = @tech_files[0];
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+      system("setenv PROJECT_TECH_FILE $tech_file");
+   }
+   else {
+      print "\nupfchar: No techfile found. Using default...";
+      $tech_file = `echo \$PROJECT_TECH_FILE`;
+      chomp($tech_file);
+      push (@prs_file,"\nset_setup -type String -value ".$tech_file." tech_file\n");
+   }
+   
+   #change work area
+   mkdir $working_dir."presto";
+   push (@prs_file,"\nset_setup -value ".$working_dir."presto Work_Area\n");
+   
+   # Reload vcc and temp, these were overwritten by loading the techfile
+   push (@prs_file,"\n$prs_vcc\n$prs_temp\n");
+   
+   #custom entry before 'simulate'
+   push (@prs_file,$_[1]);
+
+   #automatically simulate and dump data to data.csv
+   push (@prs_file,"\nsimulate\n");
+
+   #custom entry after 'simulate'
+   push (@prs_file,$_[2]);
+
+   push (@prs_file,"\nexit\n");
+   
+   #write prs file
+   open PRS_FILE, ">" . $working_dir.$_[0];
+   print PRS_FILE @prs_file;
+   close(PRS_FILE);
+
+}
+
+sub db_read {
+   open DATA, "<" . $working_dir.$_[0];
+   my @rawdata=<DATA>;
+   close(DATA);
+   
+   my @all_data;
+   my %seen=();
+   @uniquedata = grep { ! $seen{$_} ++ } @rawdata;
+
+   #tokenize csv
+   $numrows = 0;
+   foreach $raw (@uniquedata) {
+      chomp($raw);
+      @this_row = split(/,/,$raw); 
+      push (@{$_[1]},[@this_row]);
+      $numrows += 1;
+   }
+}
+
+sub csv_read {
+   open DATA, "<" . $working_dir.$_[0];
+   my @rawdata=<DATA>;
+   close(DATA);
+   
+   #my @all_data;
+   #my %seen=();
+   #@uniquedata = grep { ! $seen{$_} ++ } @rawdata;
+
+   #tokenize csv
+   $numrows = 0;
+   foreach $raw (@rawdata) {
+      chomp($raw);
+      @this_row = split(/,/,$raw); 
+      push (@{$_[1]},[@this_row]);
+      $numrows += 1;
+   }
+}
+
+sub lynx_read {
+    open DATA, "< :raw", $working_dir.$_[0];
+    binmode(DATA);
+
+    my $first1111 = 1;
+    my $col = -1;
+    while ( read(DATA, $rawnum, 4) ) {
+        $num = unpack("f>",$rawnum);
+        if ($first1111 == 1) {
+            if (abs($num - 1111) < 0.01) {
+                $first1111 = 0;
+                $col = -1;
+            } else {
+                die("LynxSplitError: First entry is not 1111 (\$num = $num");
+            }
+        } elsif (abs($num - 1111) < 0.01) {
+            $first1111 = 1;
+            push (@{$_[1]},[@this_row]);
+            undef @this_row;
+        } else {
+            $this_row[$col] = $num;
+        }
+        $col++;
+    }
+    close(DATA);
+}
+
+
+
+sub db_write {
+
+   my @all_data = @{$_[1]};
+   open DATAOUT, ">" . $working_dir.$_[0];
+      
+   $numrows = scalar(@all_data);
+   $numcols = scalar(@{$all_data[0]});
+
+   # Drop in data
+   for ($row=0;$row<$numrows;$row++) {
+      print DATAOUT $all_data[$row][0]; #first column not preceeded by comma
+      for ($col=1;$col<$numcols;$col++) {
+         print DATAOUT ",".$all_data[$row][$col];
+      }
+      print DATAOUT "\n";
+   }
+   
+   close(DATAOUT);
+}
+
+sub db_merge {
+
+   my $upfname = $_[3];
+   open DATA, "<" . $working_dir.$_[0];
+   my @tempdata=<DATA>;
+   close(DATA);
+
+   my @all_data;
+   db_read($_[1],\@all_data);
+
+   $numrows = scalar(@all_data);
+   $numcols = scalar(@{$all_data[0]});
+   
+   open DATAOUT, ">>" . $working_dir.$_[0];   
+   if (scalar(@tempdata)<1) { #make header row if new file only
+      # Drop in data
+      print DATAOUT $all_data[0][0]; #first column not preceeded by comma
+      for ($col=1;$col<$numcols;$col++) {
+         print DATAOUT ",".$all_data[0][$col];
+      }
+      print DATAOUT ",".$_[2]."\n";
+   } else {  
+      if (scalar(split(/,/,$tempdata[0])) != $numcols+1) {
+         die "\n".scalar(split(/,/,$tempdata[0]))." <> $numcols DATABASE MERGE ERROR: Databases are not compatible. A simulation possibly failed.";
+      } 
+   } 
+   for ($row=1;$row<$numrows;$row++) {
+      print DATAOUT $all_data[$row][0]; #first column not preceeded by comma
+      for ($col=1;$col<$numcols;$col++) {
+         print DATAOUT ",".$all_data[$row][$col];
+      }
+      print DATAOUT ",".$upfname."\n";
+   }
+   close(DATAOUT);         
+}
+
+sub measurement_to_db {
+   open DATA, "<" . $working_dir.$_[0];
+   my @rawdata=<DATA>;
+   close(DATA);
+   
+   my @all_data;
+   
+   #tokenize csv
+   $numrows = 0;
+   foreach $raw (@rawdata) {
+      chomp($raw);
+      @this_row = split(/,/,$raw);
+      push (@all_data,[@this_row]);
+      $numrows += 1;
+   }
+   
+   $numcols = scalar(@{$all_data[0]});
+   
+   # generate db format for easier plotting
+   open DATAOUT, ">" . $working_dir.$_[1];
+   
+   # Make header row
+         print DATAOUT $all_data[1][0];
+   for ($row=2;$row<$numrows;$row++) {
+         print DATAOUT ",".$all_data[$row][0];
+   }
+   print DATAOUT "\n";
+   
+   # Drop in data
+   for ($col=1;$col<$numcols;$col++) {
+         print DATAOUT $all_data[1][$col];
+      for ($row=2;$row<$numrows;$row++) {
+         print DATAOUT ",".$all_data[$row][$col];
+      }
+      print DATAOUT "\n";
+   }
+   
+   close(DATAOUT);
+}
+
+sub init_gui_values {
+   push(@variables,"upf,UPF version,in");
+   foreach $file (@module_output_files) {
+      my @db;
+      db_read($file."merged",\@db);
+      my $col=0;
+      foreach $var (@{$db[0]}) {
+         print ".";
+         my $is_input = 0;
+	 my $ignore = 0;
+         my $is_numeric = 0;
+         my $label = $var;
+	 if (scalar(@variables) > 0) {
+	 	$ignore = 1;
+	 } 
+         foreach $def (@variables) {
+            @defs = split(/,/,$def);
+            if (lc $defs[0] eq lc $var) {
+               $label = $defs[1];
+               if ($defs[2] =~ m/in/i) {
+                  $is_input = 1;
+               }
+	       if ($defs[2] !~ m/ignore/i) {
+	          $ignore = 0;
+	       }
+            }
+         }#@variables
+         if ( $db[1][$col] =~ /^[\+-]?[0-9]*\.?[0-9]*[e|E]?[\+-]?[0-9]*$/ && $db[1][$ccol] !~ /^[\. ]*$/ ) {
+            $is_numeric = 1;
+         }
+         if ($ignore==1) {
+	    $type = "ignore";
+	 } elsif (($is_numeric==1)&&($is_input==0)) {
+            $type = "output";
+         } elsif ($is_input==1) {
+            $type = "input";
+         } else {
+            $type = "nan";
+         }
+	 if ($type ne "ignore") {
+         $gui_values{$file."merged"}{$type}{$var}{"label"} = $label;
+         $gui_values{$file."merged"}{$type}{$var}{"col"} = $col; 
+         #print keys %{ $gui_values{$file."merged"}{"output"} };
+            if ($is_input == 1) {
+	    my @allvals = map($_->[$col], @db);
+            my %seen;
+            my @vals = grep { ! $seen{$_}++ } @allvals[1..$#allvals];
+               foreach (@vals) {
+                  push(@{ $gui_values{$file."merged"}{$type}{$var}{"values"} },$_);
+               }
+            }
+         
+         }
+      $col++;
+      }#@{$db[0]}
+   }
+}
+
+sub make_graphs {
+   print ".";
+   
+   my @db;
+   db_read($_[0],\@db);  
+   
+   my $ycol = $_[1];
+   my $xcol = $_[2];
+   my @tcols = @{$_[3]};
+   my @tvals = @{$_[4]};
+   my @lcols = @{$_[5]};
+   my @scols = @{$_[6]};
+   my $ylabel = $_[7];
+   my $xlabel = $_[8];
+   my $scatter = $_[9];
+   my $num_curves = $_[10];
+
+   my $yvar = @{$db[0]}[$ycol];
+   my $xvar = @{$db[0]}[$xcol];
+   
+   my @cols_to_keep;
+   
+   foreach (@tcols) {
+      push(@cols_to_keep,$_);
+   }
+   foreach (@lcols) {
+      push(@cols_to_keep,$_);
+   }
+   foreach (@scols) {
+      push(@cols_to_keep,$_);
+   }
+   push(@cols_to_keep,$xcol);
+   push(@cols_to_keep,$ycol);
+   
+   my $i=0; foreach $dbrow (@db) { if ( join("",@{$dbrow}) eq "" ) {splice(@db,$i,1);} $i++;} #remove empty rows
+
+   # now find the columns for x/y
+   my @xvals;
+   my @xdata; 
+   my $x_is_numeric;
+   if ( $db[1][$xcol] =~ /^[\+-]?[0-9]*\.?[0-9]*[e|E]?[\+-]?[0-9]*$/ && $db[1][$xcol] !~ /^[\. ]*$/ ) {
+      $x_is_numeric = 1;
+   } else {
+      $x_is_numeric = 0;
+   } # endfind the columns for x/y
+
+   # now find the columns for each grouped columns
+   my $scols_exist =0;
+   if (scalar(@scols)>0) {
+      $scols_exist = 1;
+   }
+   my $lcols_exist =0;
+   if (scalar(@lcols)>0) {
+      $lcols_exist = 1;
+   }
+  
+
+   @cols_to_keep=sort { $a <=> $b } @cols_to_keep;
+   for my $gid (0) {
+      my $autotitle;
+      for my $tid (0..$#tcols) {
+         $autotitle = $autotitle . @{$db[0]}[$tcols[$tid]] ."=". $tvals[$tid] .", ";
+      }
+      chop($autotitle); chop($autotitle);
+      my @csv;
+      my @csv_x;
+      my $i=0;
+      push(@csv,[ @{$db[0]} ]);
+      foreach $dbrow (@db[1..$#db]) { #each row (ignore title row)
+         if ((join(">_<",@tvals) eq join(">_<",@{$dbrow}[@tcols]))||(scalar(@tcols)==0)) {
+            push(@csv,[ @{$dbrow} ]); # only copy data that matches tval
+         }
+         $i++;
+      }
+      $fname=$yvar ." vs ". $yvar.", ".$autotitle;
+      $fname=~ s/=/_/g;
+      $fname=~ s/[\/, ]/_/g;
+      $fname=~ s/[\.]/p/g;
+      
+      my $success = 0;
+      while ($success == 0) {
+      if (-e "$working_dir$fname.csv") {
+         $fname = $fname . "0";
+      } else {
+         $success = 1;
+      } }
+ 
+    my @xvals;
+    my @xdata;
+ 
+	foreach $dbrow (@csv[1..$#csv]) { #each row (ignore title row)
+	my $matched = 0;
+	my $i=0; foreach $xval (@xvals) { #see if found uniques match
+		if (lc $xval eq lc @{$dbrow}[$xcol]) {
+		$matched=1;
+		push(@xdata,$i); } $i++;
+		}
+	if (($matched==0) && (@{$dbrow}[$xcol] ne "")) { #if no match, add it to the list!
+		push(@xvals,@{$dbrow}[$xcol]);
+		push(@xdata,$i);
+        $data_order[$i] = @{$dbrow}[$xcol];
+	}
+	}
+
+    #my %correct_skew_order = ("ssss"=>0,"rsssas"=>1,"rsss"=>2,"rcss"=>3,"psss"=>4,"tttt"=>5,"pfff"=>6,"rcff"=>7,"rfff"=>8,"rfffaf"=>10,"ffff"=>11);
+    #my %correct_skew_order = ("ssss"=>0,"rsssas"=>1,"rsss"=>2,"rcss"=>3,"psss"=>4,"pcss"=>5,"prcs"=>6,"tttt"=>7,"prcf"=>8,"pcff"=>9,"pfff"=>10,"rcff"=>11,"rfff"=>12,"rfffaf"=>13,"ffff"=>14);
+    my %correct_skew_order = ("ssss"=>0,"rsssas"=>1,"rsss"=>2,"rcss"=>3,"acss"=>4,"psss"=>5,"pcss"=>6,"prcs"=>7,"tttt"=>8,"prcf"=>9,"pcff"=>10,"pfff"=>11,"acff"=>12,=>"rcff"=>13,"rfff"=>14,"rfffaf"=>15,"ffff"=>16);
+    #print keys %correct_skew_order;
+    #print "\n@xvals\n";
+
+    my @xdata_sorted;
+	if (grep {$_ eq $xvals[0]} keys %correct_skew_order) {
+        @xvals_sorted = sort {$correct_skew_order{$a} <=> $correct_skew_order{$b}} @xvals;
+        #print "\n@xvals";
+        #print "\n@xvals_sorted\n";
+        #print keys @xvals;
+        my $i=0;
+        foreach $val (@xvals_sorted) {
+            $data_reorder{$val} = $i++;
+            #print "$val = $i\n"
+        }
+        foreach $xdat (@xdata) {
+            push(@xdata_sorted,$data_reorder{$data_order[$xdat]});
+        }
+        @xvals = @xvals_sorted;
+        @xdata = @xdata_sorted;
+    } #elsif (grep {/^[np]/} $xvals[0]) {
+#        @xvals_sorted = sort { $a cmp $b } @xvals;
+#        my $i=0;
+#        foreach $val (@xvals_sorted) {
+#            $data_reorder{$val} = $i++;
+#            #print "$val = $i\n"
+#        }
+#        foreach $xdat (@xdata) {
+#            push(@xdata_sorted,$data_reorder{$data_order[$xdat]});
+#        }
+#        @xvals = @xvals_sorted;
+#        @xdata = @xdata_sorted;
+#        print "*Sorting x-axis by abc*";
+#    }
+
+            if ($x_is_numeric == 0) {
+               @csv_x=@xdata;
+            }	
+ 
+    my @lvals;
+
+   foreach $csvrow (@csv[1..$#csv]) { #each row (ignore title row)
+      my $matched = 0;
+      foreach $lval (@lvals) { #see if found uniques match
+         if (join(">_<",@{$lval}) eq join(">_<",@{$csvrow}[@lcols])) {
+            $matched=1;
+         }
+      }
+      if (($matched==0)&&(join("",@{$csvrow}[@lcols]) ne "")) { #if no match, add it to the list!
+          push(@lvals,[ @{$csvrow}[@lcols] ]);
+      }
+   }     
+      
+      # If xvar is string, put xvar=xval in tooltip
+      #if ($x_is_numeric == 0) {
+      #   push(@scols,$xcol);
+      #   $scols_exist = 1;
+      #}
+      
+      # write csv file for data lovers
+      my @csv_file;
+      my %seen;
+      my @uniq_cols_to_keep = grep { ! $seen{$_}++ } @cols_to_keep;
+      for (my $i=scalar(@csv)-1;$i>=0;$i--) {
+         foreach $col (@uniq_cols_to_keep) {
+            push(@{$csv_file[$i]},$csv[$i][$col]);
+         }
+      }   
+      db_write("$fname.csv",\@csv_file);
+      
+      # MAKE GRAPH PAGE #################################################### MAKE GRAPH ########
+open GRAPH, ">" . $working_dir . "$fname.html";
+   print GRAPH '<html> <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>'."$db[0][$ycol] ($module_to_run)".'</title>
+    <link href="common/layout.css" rel="stylesheet" type="text/css">
+    <!--[if lte IE 8]><script language="javascript" type="text/javascript" src="common/excanvas.min.js"></script><![endif]-->
+    <script language="javascript" type="text/javascript" src="common/jquery.js"></script>
+    <script language="javascript" type="text/javascript" src="common/jquery.flot.js"></script>
+    <script language="javascript" type="text/javascript" src="common/jquery.flot.symbol.js"></script>
+    <script language="javascript" type="text/javascript" src="common/jquery.flot.resize.js"></script>
+    <script language="javascript" type="text/javascript" src="common/jquery.flot.navigate.js"></script>
+    <script language="javascript" type="text/javascript" src="common/jquery.flot.axislabels.js"></script>
+    <style type="text/css">    html, body { height: 100%; /* make the percentage height on placeholder work */    }    .message {
+        padding-left: 50px;
+        font-size: smaller;
+    }    </style> </head> </head> <body><h1>';
+   print GRAPH "$ylabel vs. $xlabel</h1><h2>$autotitle";
+   print GRAPH '</h2>    	<div id="labeler" style="float:right;padding-right:50px"></div>
+    <div id="placeholder" style="width:95.5%;height:70%;float:left"></div> <div id="whitespace" style="width:100%,float:left"><p><br>&nbsp<br>&nbsp<br>&nbsp<br></p></div>
+	<p id="choices">Datasets to plot: <br><a href="'.$fname.'_datatable.html">(click here for data in table format)</a></p>
+<script type="text/javascript">
+$(function () { var datasets = {';
+
+   my $xlen = scalar(@csv)/(1+scalar(@lvals));
+   if ($xlen > 200) {$radius = 2;   $linewidth = 2;}
+   elsif ($xlen > 100) {$radius = 3;   $linewidth = 2;}
+   elsif ($xlen > 50) {$radius = 4;   $linewidth = 2;}
+   elsif ($xlen > 25) {$radius = 5;   $linewidth = 3;}
+   else {$radius = 6;   $linewidth = 3;}
+   
+   my $firstone=1;
+   my $symbol="circle";
+   if ($lcols_exist == 0) {$lvals[0]="none"};
+   for my $gid2 (0..$#lvals) {
+      my @xyvals;
+   my @datalabels2;
+      my $autolegend;
+      if ($lvals[0] ne "none") {
+         for my $tid2 (0..$#lcols) {
+            $autolegend = $autolegend . $csv[0][$lcols[$tid2]] ."=". $lvals[$gid2][$tid2] .", ";
+         }
+            chop($autolegend); chop($autolegend);
+      } else { $autolegend = "Data"; }
+      my $i=0;
+      foreach $csvrow (@csv[1..$#csv]) { #each row (ignore title row)
+
+         if ((join(">_<",@{$lvals[$gid2]}) eq join(">_<",@{$csvrow}[@lcols]))||($lvals[0] eq "none")) {
+		if ($x_is_numeric == 1) {
+			push(@xyvals,[(@{$csvrow}[$xcol],@{$csvrow}[$ycol])]);
+		} else {
+			push(@xyvals,[($csv_x[$i],@{$csvrow}[$ycol])]);
+		}
+		if ($scols_exist == 1) {
+		   push(@datalabels2,[@{$csvrow}[@scols]]);
+		}
+         }
+         $i++;
+      }
+my $i=0;      
+my @datalabels;
+foreach (@datalabels2) {
+      for my $tid2 (0..$#scols) {
+         $datalabels[$i] = $datalabels[$i] . $csv[0][$scols[$tid2]] ."=". @{$_}[$tid2] .", ";
+      }   chop($datalabels[$i]);  chop($datalabels[$i]);
+$i++;}
+      
+   $i=0;
+#    foreach (@xyvals) {
+#   print "@{$_} $xvals[@{$_}[0]]\n";
+#    }
+   if ($firstone==1) {
+      print GRAPH "\n";
+      $firstone=0;
+   } else {
+      print GRAPH ",\n";
+      }
+   print GRAPH "\"data$gid2\": {\n";
+   print GRAPH "label: \"$autolegend\",\n";
+   print GRAPH "data: [";
+   for ($i=0;$i<scalar(@xyvals)-1;$i++) {
+# print scalar(@xyvals)-1;
+      print GRAPH "[".$xyvals[$i][0].",".$xyvals[$i][1]."],";
+   }
+      print GRAPH "[".$xyvals[$i][0].",".$xyvals[$i][1]."]],\n";
+if ($scols_exist ==1) {   
+   print GRAPH "datalabels: [";
+   for ($i=0;$i<scalar(@xyvals)-1;$i++) {
+      print GRAPH "\"".join(",",@datalabels[$i])."\",";
+   }
+      print GRAPH "\"".join(",",@datalabels[$i])."\"],\n";
+}      
+if ($scatter == 1){   
+   print GRAPH "lines: {show: false, lineWidth: $linewidth},\n";
+}else{
+   print GRAPH "lines: {show: true, lineWidth: $linewidth},\n";
+}
+   print GRAPH "points: {symbol: \"$symbol\", radius: $radius}}";
+   if ($symbol eq "circle") {
+      $symbol = "square";
+      }
+   elsif ($symbol eq "square") {
+      $symbol = "diamond";
+      }
+   elsif ($symbol eq "diamond") {
+      $symbol = "triangle";
+      }
+   elsif ($symbol eq "triangle") {
+      $symbol = "cross";
+      $symbol = "circle";
+      }
+   else {
+      $symbol = "circle";
+      }
+}
+   print GRAPH "};\n"; #comes at end of datasets
+  print GRAPH '    // hard-code color indices to prevent them from shifting as
+    // countries are turned on/off
+    var i = 0;
+    var imax = Object.keys(datasets).length-1;
+    $.each(datasets, function(key, val) {
+	    val.color = RainbowColor(i/imax,220);
+	    val.points.fillColor = 0;
+	    val.points.fill = true;
+        i = i + 1;
+    });
+
+  function RainbowColor(n,s)
+  {
+    var r = Math.round(Math.max(0,Math.min(s,Math.pow((1-2*n)*Math.pow(s,2),0.5))));
+    var b = Math.round(Math.max(0,Math.min(s,Math.pow((2*n-1)*Math.pow(s,2),0.5))));
+    r = r || 0;
+    b = b || 0;
+    var g = Math.round(Math.max(0,Math.min(s,Math.pow(Math.pow(s,2)-Math.pow(Math.max(r,b),2),0.5))));
+    [r,g,b] = hslToRgb(0.75*n, 0.75, 0.5);
+    return RGB2Color(r,g,b);
+  }
+  function byte2Hex(n)
+  {
+    var nybHexString = "0123456789ABCDEF";
+    return String(nybHexString.substr((n >> 4) & 0x0F,1)) + nybHexString.substr(n & 0x0F,1);
+  }
+  function RGB2Color(r,g,b)
+  {
+    return \'#\' + byte2Hex(Math.round(r)) + byte2Hex(Math.round(g)) + byte2Hex(Math.round(b));
+  }
+  function hslToRgb(h, s, l) {
+  var r, g, b;
+
+  if (s == 0) {
+    r = g = b = l; // achromatic
+  } else {
+    function hue2rgb(p, q, t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    }
+
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    var p = 2 * l - q;
+
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+
+  return [ r * 255, g * 255, b * 255 ];
+}
+
+    function showTooltip(x, y, contents) {
+        $(\'<div id="tooltip">\' + contents + \'</div>\').css( {
+            position: \'absolute\',
+            display: \'none\',
+            top: y + 0,
+            left: x + 10,
+            border: \'1px solid #000\',
+            padding: \'2px\',
+            \'background-color\': \'#eee\',
+	    opacity: 1
+        }).appendTo("body").fadeIn(00);
+    }
+
+    var previousPoint = null;
+    $("#placeholder").bind("plothover", function (event, pos, item) {
+        $("#x").text(pos.x.toFixed(2));
+	$("#y").text(pos.y.toFixed(2));
+
+            if (item) {
+                if (previousPoint != item.pageX) {
+                    previousPoint = item.pageX + item.pageY;
+                    
+                    $("#tooltip").remove();
+                    var x = item.datapoint[0].toFixed(2),
+                        y = item.datapoint[1].toFixed(2);
+                    
+			showTooltip(pos.pageX, pos.pageY, "<b><small><small>"+
+				item.series.label ';
+if ($scols_exist ==1) {print GRAPH ' + "<br>" + item.series.datalabels[item.dataIndex]';} 
+print GRAPH ' + "<br>(" + x + ", " + y + ")</small></small></b>");
+		    
+                }
+            }
+            else {
+                $("#tooltip").remove();
+                previousPoint = null;            
+            }
+        
+   });
+
+    // insert checkboxes 
+    var choiceContainer = $("#choices");
+    var myvar = 0
+    $.each(datasets, function(key, val) {
+    myvar++;
+        if (myvar < '.$num_curves.') {
+        choiceContainer.append(\'<br/><input type="checkbox" name="\' + key +
+                               \'" checked="checked" id="id\' + key + \'">\' +
+                               \'<label for="id\' + key + \'">\'
+                                + val.label + \'</label>\');
+        } else {
+                choiceContainer.append(\'<br/><input type="checkbox" name="\' + key +
+                               \'" id="id\' + key + \'">\' +
+                               \'<label for="id\' + key + \'">\'
+                                + val.label + \'</label>\');
+          }
+    });
+    choiceContainer.find("input").click(plotAccordingToChoices);
+
+    
+    function plotAccordingToChoices() {
+	    var data = [];
+
+        choiceContainer.find("input:checked").each(function () {
+            var key = $(this).attr("name");
+            if (key && datasets[key])
+		data.push(datasets[key]);
+        });
+
+	if (data.length > 0) {
+            var plot = $.plot($("#placeholder"), data, {';
+   print GRAPH "xaxis: { autoscaleMargin: null, axisLabel: \'$xlabel\'";
+   if ($x_is_numeric == 1) {
+   print GRAPH "},";
+   } else {
+   print GRAPH ", ticks: [".join(",",0..$#xvals)."], min: 0, max: $#xvals,";
+   print GRAPH "tickFormatter: function (v, axis) {return [\"".join("\",\"",@xvals)."\"][v];}";
+   print GRAPH "},";
+   }
+   print GRAPH "yaxis: { autoscaleMargin: null, axisLabel: \'$ylabel\'},";
+   print GRAPH 'points: {show: true },
+		grid: { hoverable: true, clickable: true },
+	    	legend:{noColumns:4,container: $("#labeler")},
+		zoom: { interactive: true,
+			amount: 1.1},
+        	pan: {interactive: true}
+	    });
+
+	    $("#placeholder").append(\'<div style="position:absolute;left:\' + 55 + \'px;top:\' + 6 + \'px;color:#ccc;font-size:small">UPFchar plot generated for user: '.$whoami.'</div>\');
+	    
+	}
+    }
+    plotAccordingToChoices();
+
+});
+</script></body></html>'; 
+   
+   
+close(GRAPH);
+      # END MAKE GRAPH PAGE ################################################ END MAKE GRAPH ####
+      # MAKE TABLE PAGE #################################################### MAKE TABLE ########
+open TABLE, ">" . $working_dir . $fname."_datatable.html";
+print TABLE '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+
+      <title>DataTables example</title>
+      <style type="text/css" title="currentStyle">
+         @import "common/layout.css";
+         @import "common/demo_table_jui.css";
+         @import "common/jquery-ui-1.8.4.custom.css";
+      </style>
+      <script type="text/javascript" language="javascript" src="common/jquery.js"></script>
+      <script type="text/javascript" language="javascript" src="common/jquery.dataTables.min.js"></script>
+      <script type="text/javascript" charset="utf-8">
+         $(document).ready(function() { var oTable;
+    $("#example tbody tr").click( function( e ) {
+        if ( $(this).hasClass("row_selected") ) {
+            $(this).removeClass("row_selected");
+        }
+        else {
+            oTable.$("tr.row_selected").removeClass("row_selected");
+            $(this).addClass("row_selected");
+        }
+    });
+
+    /* Add a click handler for the delete row */
+    $("#delete").click( function() {
+        var anSelected = fnGetSelected( oTable );
+        oTable.fnDeleteRow( anSelected[0] );
+    } );
+
+            oTable = $("#example").dataTable({
+               "bJQueryUI": true,
+               "sPaginationType": "full_numbers",
+               "iDisplayLength": 20,
+               "aLengthMenu": [[10, 20, 40, 80, -1], [10, 20, 40, 80, "All"]],
+            });
+
+/* Get the rows which are currently selected */
+function fnGetSelected( oTableLocal )
+{
+    return oTableLocal.$("tr.row_selected");
+}
+
+         } );
+      </script>
+   </head>
+   <body id="dt_example" class="ex_highlight_row">
+      <div id="container">
+<!--         <div class="full_width big">
+            DataTables with jQuery UI themes example
+         </div>-->
+
+
+         <h1>'."$ylabel vs. $xlabel</h1><h2>$autotitle".'</h2>
+         <p><a href="'.$fname.'.csv">Click here to download as .csv</a></p>
+         <div class="example">
+<table cellpadding="0" cellspacing="0" border="0" class="display" id="example">
+   <thead>
+      <tr>';
+foreach (@{$csv_file[0]}) {
+   print TABLE "<th>$_</th>\n";
+}
+print TABLE '      </tr>
+   </thead>
+   <tbody>';
+foreach $csvrow (@csv_file[1..$#csv_file]) {
+   print TABLE '      <tr class="gradeA">';
+   foreach (@{$csvrow}) {
+      print TABLE '         <td class="center">'.$_."</td>\n";
+   }
+   print TABLE '      </tr>';
+}
+print TABLE '   </tbody>
+</table>
+         </div>
+         <div class="spacer"></div></div>
+   </body>
+</html>';
+close(TABLE);
+      # END MAKE GRAPH PAGE ################################################ END MAKE TABLE ####         
+   }
+
+$fname =~ s/\(/\\\(/g;
+$fname =~ s/\)/\\\)/g;
+
+if (1 - $standard_graphs) {
+   system("firefox ".$working_dir.$fname.".html &");
+} else {
+    push(@standard_graphs_list,$working_dir.$fname.".html");
+}
+
+}
+
+
+sub make_index_header {
+   open INDEX, ">" . $working_dir . "index.html";
+   print INDEX '<html>
+ <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>UPFchar</title>    <link href="common/layout.css" rel="stylesheet" type="text/css"> 
+    <script type="text/javascript" src="common/CollapsibleLists.compressed.js"></script>
+    <script type="text/javascript" src="common/OnloadScheduler.compressed.js"></script>    
+        <script type="text/javascript">
+
+      OnloadScheduler.schedule(function(){ CollapsibleLists.apply(); });
+
+    </script>
+    </head> <body>	 <h1>UPFchar</h1>	 <h2>Module: '.$module_to_run.'</h2>
+	 <h2>UPF(s): <br>'.join("<br>",@upf_ids).'</h2>
+	 <h2>User: '.$whoami.'</h2>    <p>Choose one of the availiable plots:</p>    ';
+   
+   close(INDEX);
+}
+sub make_index_footer {
+   open INDEX, ">>" . $working_dir . "index.html";
+   print INDEX "<ul class=\"collapsibleList\">Choose y-axis:\n";
+   foreach $ykey (keys %indexhash) {
+      print INDEX "<li>$ykey<ul>Choose x-axis:<br>\n";
+      foreach $xkey (keys %{ $indexhash{$ykey} } ) {
+         print INDEX "   <li>$xkey<ul>Curves separated by:<br>\n";
+         foreach $skey (keys %{ $indexhash{$ykey}{$xkey} } ) {
+            print INDEX "      <li>$skey<ul>With constant:<br>\n";
+            for (my $i=0;$i < scalar(@{ $indexhash{$ykey}{$xkey}{$skey}[0] });$i++  ) {
+               print INDEX "         <li><a href=".$indexhash{$ykey}{$xkey}{$skey}[1][$i].".html>"
+                                            .$indexhash{$ykey}{$xkey}{$skey}[0][$i]."</a></li>\n";
+            }
+            print INDEX "</ul></li>\n";
+         }
+         print INDEX "</ul></li>\n";
+      }
+      print INDEX "</ul></li>\n";
+   }
+   print INDEX '</ul> </body></html>';
+   close(INDEX);
+}

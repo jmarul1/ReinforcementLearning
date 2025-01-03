@@ -1,0 +1,164 @@
+
+max posErr=0.0001um
+max techFileCoordinate=120um
+GdsAttribute signal=2
+lenParm gplane=-0.3015um
+
+groundplane: gplane
+
+layer pd(8:0),      type=interconnect, depth=( -0.1015um, -0.0015um )
+layer nd(1:0),      type=interconnect, depth=( -0.1015um, -0.0015um )
+layer p(2:0,10,11), type=interconnect, depth=( 0.0000um, 0.0685um )
+layer pExp1=p,      type=dielectric,   depth=( 0.0685um, 0.0985um ), eps=5.8, expand=0.0015um
+layer pExp2=p,      type=dielectric,   depth=( -0.0015um, 0.0685um ), eps=22, expand=0.0015um
+layer pExp3=p,      type=dielectric,   depth=( -0.0015um, 0.0985um ), eps=4.5, expand=0.0075um
+layer gcn(6:0),     type=interconnect, depth=( 0.0685um, 0.0985um )
+layer tcn(5:0),     type=interconnect, depth=( -0.0015um, 0.0985um )
+layer vcn(3:0),     type=via,          depth=( 0.0985um, 0.1385um )
+layer m0(55:0),     type=interconnect, depth=( 0.1385um, 0.1685um )
+layer via0(56:0),   type=via,          depth=( 0.1685um, 0.2165um )
+layer m1(4:0),      type=interconnect, depth=( 0.2165um, 0.2495um )
+layer via1(13:0),   type=via,          depth=( 0.2495um, 0.2905um )
+layer m2(14:0),     type=interconnect, depth=( 0.2905um, 0.3335um )
+layer via2(17:0),   type=via,          depth=( 0.3335um, 0.3735um )
+layer m3(18:0),     type=interconnect, depth=( 0.3735um, 0.4150um )
+layer via3(21:0),   type=via,          depth=( 0.4150um, 0.4550um )
+layer m4(22:0),     type=interconnect, depth=( 0.4550um, 0.4970um )
+layer via4(25:0),   type=via,          depth=( 0.4970um, 0.5460um )
+layer m5(26:0),     type=interconnect, depth=( 0.5460um, 0.6285um )
+layer via5(29:0),   type=via,          depth=( 0.6285um, 0.6785um )
+layer m6(30:0),     type=interconnect, depth=( 0.6785um, 0.7610um )
+layer via6(33:0),   type=via,          depth=( 0.7610um, 0.8570um )
+layer m7(34:0),     type=interconnect, depth=( 0.8570um, 0.9680um )
+layer via7(37:0),   type=via,          depth=( 0.9680um, 1.1130um )
+layer m8(38:0),     type=interconnect, depth=( 1.1130um, 1.2780um )
+layer via8(41:0),   type=via,          depth=( 1.2780um, 1.4580um )
+layer m9(46:0),     type=interconnect, depth=( 1.4580um, 1.6330um )
+layer via9(45:0),   type=via,          depth=( 1.6330um, 1.8850um )
+layer m10(54:0),    type=interconnect, depth=( 1.8850um, 2.1800um )
+layer via10(53:0),  type=via,          depth=( 2.1800um, 2.4600um )
+layer m11(58:0),    type=interconnect, depth=( 2.4600um, 2.8100um )
+layer via11(57:0),  type=via,          depth=( 2.8100um, 3.5000um )
+layer m12(62:0),    type=interconnect, depth=( 3.5000um, 4.7100um )
+layer via12(61:0),  type=via,          depth=( 4.7100um, 6.1920um )
+layer ce1(91:0),    type=interconnect, depth=( 5.3600um, 5.3700um )
+layer mimdiel=ce1,  type=dielectric,   depth=( 5.3700um, 5.3820um ), eps=1.0, expand=0.0um
+layer ce2(90:0),    type=interconnect, depth=( 5.3820um, 5.3920um )
+layer tm1(42:0),    type=interconnect, depth=( 6.1920um, 12.1920um )
+layer tv1(80:10),   type=via,          depth=( 12.1920um, 18.1920um )
+layer c4(92:0),     type=interconnect, depth=( 18.1920um, 35.3420um )
+
+
+
+; Planar dielectrics
+
+QuickCapVerbatim eps  3.9 up to 0.0985um
+QuickCapVerbatim eps 5.85 up to 0.1035um
+QuickCapVerbatim eps  2.7 up to 0.1685um
+QuickCapVerbatim eps  4.8 up to 0.1765um
+QuickCapVerbatim eps 2.75 up to 0.2495um
+QuickCapVerbatim eps  4.8 up to 0.2575um
+QuickCapVerbatim eps 2.75 up to 0.3335um
+QuickCapVerbatim eps  4.8 up to 0.3415um
+QuickCapVerbatim eps 2.75 up to 0.4150um
+QuickCapVerbatim eps  4.8 up to 0.4230um
+QuickCapVerbatim eps 2.75 up to 0.4970um
+QuickCapVerbatim eps  4.8 up to 0.5070um
+QuickCapVerbatim eps 2.71 up to 0.6285um
+QuickCapVerbatim eps  5.5 up to 0.6385um
+QuickCapVerbatim eps 2.71 up to 0.7610um
+QuickCapVerbatim eps  5.5 up to 0.7730um
+QuickCapVerbatim eps 2.75 up to 0.9680um
+QuickCapVerbatim eps  4.8 up to 0.9780um
+QuickCapVerbatim eps 2.66 up to 1.2780um
+QuickCapVerbatim eps  4.8 up to 1.2880um
+QuickCapVerbatim eps  2.6 up to 1.6330um
+QuickCapVerbatim eps  5.4 up to 1.6830um
+QuickCapVerbatim eps  2.8 up to 2.1800um
+QuickCapVerbatim eps  5.5 up to 2.2500um
+QuickCapVerbatim eps 2.78 up to 2.8100um
+QuickCapVerbatim eps  5.5 up to 2.9200um
+QuickCapVerbatim eps    4 up to 4.7100um
+QuickCapVerbatim eps 5.85 up to 4.7600um
+QuickCapVerbatim eps  6.5 up to 12.1920um
+QuickCapVerbatim eps    4 up to 18.1920um
+QuickCapVerbatim eps 3.71 up to 45.3420um
+
+;VeriCheckVerbatim variable double PDIFF_SIZE = 0;
+;VeriCheckVerbatim variable double NDIFF_SIZE = 0;
+;VeriCheckVerbatim variable double  POLY_SIZE = 0;
+;VeriCheckVerbatim variable double   TCN_SIZE = -0;
+;VeriCheckVerbatim variable double   GCN_SIZE = 0.005;
+;VeriCheckVerbatim variable double   VCN_SIZE = -0.00023;
+;VeriCheckVerbatim variable double  MET0_SIZE = -0.0015;
+;VeriCheckVerbatim variable double  MET1_SIZE = -0.0015;
+;VeriCheckVerbatim variable double  MET2_SIZE = -0.00085;
+;VeriCheckVerbatim variable double  MET3_SIZE = -0.00075;
+;VeriCheckVerbatim variable double  MET4_SIZE = -0.0005;
+;VeriCheckVerbatim variable double  MET5_SIZE = 0;
+;VeriCheckVerbatim variable double  MET6_SIZE = 0;
+;VeriCheckVerbatim variable double  MET7_SIZE = -0.00025;
+;VeriCheckVerbatim variable double  MET8_SIZE = 0;
+;VeriCheckVerbatim variable double  MET9_SIZE = 0;
+;VeriCheckVerbatim variable double MET10_SIZE = -0.001;
+;VeriCheckVerbatim variable double MET11_SIZE = -0.004;
+;VeriCheckVerbatim variable double MET12_SIZE = 0;
+;VeriCheckVerbatim variable double   CE1_SIZE = 0;
+;VeriCheckVerbatim variable double   CE2_SIZE = 0;
+;VeriCheckVerbatim variable double   TM1_SIZE = 0;
+;VeriCheckVerbatim variable double    C4_SIZE = -7.5;
+;VeriCheckVerbatim variable double     PD_SPC = 0.03;
+;VeriCheckVerbatim variable double     ND_SPC = 0.03;
+;VeriCheckVerbatim variable double      P_SPC = 0.042;
+;VeriCheckVerbatim variable double     M0_SPC = 0.028;
+;VeriCheckVerbatim variable double     M1_SPC = 0.028;
+;VeriCheckVerbatim variable double     M2_SPC = 0.024;
+;VeriCheckVerbatim variable double     M3_SPC = 0.024;
+;VeriCheckVerbatim variable double     M4_SPC = 0.024;
+;VeriCheckVerbatim variable double     M5_SPC = 0.04;
+;VeriCheckVerbatim variable double     M6_SPC = 0.04;
+;VeriCheckVerbatim variable double     M7_SPC = 0.056;
+;VeriCheckVerbatim variable double     M8_SPC = 0.08;
+;VeriCheckVerbatim variable double     M9_SPC = 0.08;
+;VeriCheckVerbatim variable double    M10_SPC = 0.126;
+;VeriCheckVerbatim variable double    M11_SPC = 0.126;
+;VeriCheckVerbatim variable double    M12_SPC = 0.54;
+;VeriCheckVerbatim variable double    CE1_SPC = 1;
+;VeriCheckVerbatim variable double    CE2_SPC = 1;
+;VeriCheckVerbatim variable double    TM1_SPC = 5.5;
+;VeriCheckVerbatim variable double     C4_SPC = 45;
+
+;Netcap3dVerbatim scale_factor 1
+;Netcap3dVerbatim ZONES Yes
+;Crisp4ResolutionVerbatim 1e6
+
+;TECH_RUNSET_VER 6.3_6_p1
+;TECH_GDS_RESOLUTION 0.0001
+;TECH_LTL_RESOLUTION 4
+;TECH_DUMMYGATE_DETECTION 1
+;TECH_AIRGAP_PROCESS 0
+;TECH_CRISP_ENGINE 5
+;TECH_CAP2INP_ENGINE 6
+;TECH_TCN_WIDTHSIZE -0.0005
+;TECH_TCN2_THICKNESS 0
+;TECH_DEVICE_PARM PITCH POL_WIDTH TCN_WIDTH DGATE_GNDCAP DGATE_SDCAP GATE_ENDCAP
+;LENGTHTOL 0.05
+;NUM_NDEVICE 5
+;7.0e-02 2.8e-02 2.7e-02 4.0e-18 1.0700e-15 4.8100e-18
+;7.0e-02 3.2e-02 2.7e-02 4.0e-18 1.0500e-15 4.8100e-18
+;8.4e-02 4.2e-02 2.7e-02 4.0e-18 1.5200e-15 4.8100e-18
+;1.4e-01 9.0e-02 2.7e-02 4.0e-18 1.2500e-15 4.2400e-18
+;2.1e-01 1.6e-01 2.7e-02 4.0e-18 2.0200e-15 4.2400e-16
+;NUM_PDEVICE 5
+;7.0e-02 2.8e-02 2.7e-02 4.0e-18 1.1900e-15 4.8100e-18
+;7.0e-02 3.2e-02 2.7e-02 4.0e-18 1.1500e-15 4.8100e-18
+;8.4e-02 4.2e-02 2.7e-02 4.0e-18 1.7700e-15 4.8100e-18
+;1.4e-01 9.0e-02 2.7e-02 4.0e-18 1.4600e-15 4.2400e-18
+;2.1e-01 1.6e-01 2.7e-02 4.0e-18 2.3300e-15 4.2400e-16
+;TECH_POLTCN_PARM PITCH POL_WIDTH TCN_WIDTH TCN1_CARVE
+;NUM_POLTCNCONFIG 5
+;7.0e-02 2.8e-02 2.7e-02 0.0000e+00
+;7.0e-02 3.2e-02 2.7e-02 2.0000e-03
+;8.4e-02 4.2e-02 2.7e-02 0.0000e+00
+;1.4e-01 9.0e-02 2.7e-02 0.0000e+00
+;2.1e-01 1.6e-01 2.7e-02 0.0000e+00

@@ -1,0 +1,597 @@
+#!/usr/intel/pkgs/perl/5.6.1/bin/perl -w
+#!/usr/intel/bin/perl5.85 -d:ptkdb
+#--------------------------------------------------#
+# Script to generate RVE error file from ICV.
+#--------------------------------------------------#
+def_glb_var();
+
+show_help() if( ! $ARGV[0] );
+
+get_args();
+
+gen_rve_icv();
+
+exit(0);
+
+
+
+#--------------------------------------------------#
+# Define all global variables.
+#--------------------------------------------------#
+sub def_glb_var {
+  $Version = "ww35'13";
+  $Support = "Ismael.Villegas\@intel.com";
+  $Bin = iv__FileGetName($0);
+
+  $RveOW = $Rve = $Icv = $TopOnly = 0;
+
+  %HashErrorId = ();
+
+# Release Notes:
+# ww35'13 : added support to show density properties
+# ww33'13 : added support for .TOP_LAYOUT_ERRORS
+# ww28'13 : updated to ignore some of the extraction violations, since they don't follow normal DRC syntax
+#         :  fixed problem of converting errors which are after the ICV 'WARNING' about errors being limited
+# ww22'13 : added full NAC support
+# ww14'13 : added $TopOnly (-top_only)
+# ww42'12 : bypassing 'HFLIGHTLINE', since it flags layout-grid issues
+# ww37'11 : added support for ICV error files & renamed script to err2rve (as opposed to her2rve)
+# ww13'11 :
+# - started keeping track
+# - fixed issue with parsing drc_version results
+#
+# prior to this, ww15'10 was the last touched version
+#
+}
+
+
+
+
+#--------------------------------------------------#
+# Get user options.
+#--------------------------------------------------#
+sub get_args {
+  my $ndx=0, $tmp=0, @buf=(), $i=0, $cnt=@ARGV, $noLmt=0, @lstArg=("-err","-l","-lmt","-ids","-rve","-icv","-err");
+  my @lstAll=(@lstArg,"-s","-split","-nolimit","-overwrite","-top_only");
+
+
+  foreach my $arg (@ARGV) { show_help()  if( $arg eq "-h" || $arg eq "-help" ); }
+
+  foreach my $arg (@ARGV) {
+    $i++;
+
+    iv__Exit("Must provide value for argument:  $arg")  if( $i==$cnt   &&   grep(/^$arg$/,@lstArg) );
+    iv__Exit("Wrong argument (use -h for help):  $arg") if( $arg=~/^-/ && ! grep(/^$arg$/,@lstAll) );
+
+    $Split=1  if( $arg eq "-split" || $arg eq "-s"  );  # -s for backward comp.
+    $Icv=1    if( $arg eq "-icv"   || $arg eq "-err");
+
+#   $File=$ARGV[$i]  if( $arg eq "-err" ); # backward compatability
+    $File=$ARGV[$i]  if( $arg eq "-err" );
+    $File=$ARGV[$i]  if( $arg eq "-icv" );
+
+    $Limit=$ARGV[$i] if( $arg eq "-lmt" || $arg eq "-l" );  # -l for backward comp.
+    $Rve=$ARGV[$i]   if( $arg eq "-rve" );
+
+    @LstId=(@LstId,split(/,/,$ARGV[$i]))  if( $arg eq "-ids" );
+
+    $noLmt=1    if( $arg eq "-nolimit"   );
+    $RveOW=1    if( $arg eq "-overwrite" );
+    $TopOnly=1  if( $arg eq "-top_only"  );
+  }
+
+  iv__Exit("Must specify error file with '-err' or '-icv' option")  if( ! $File );
+  iv__Exit("File does not exist:  $File")  if( ! -f $File );
+
+  $Limit=1000  if( ! $Limit );
+  $Limit=0     if(   $noLmt );
+
+  $ndx = rindex($File,"/");
+  $tmp = substr($File,$ndx+1,1000);
+
+  $Script = $tmp;
+
+  $Rve = $tmp . ".rve"  if( ! $Rve );
+
+  $Total    = 0;
+  $ErrorCnt = 1;
+  $tmp      = `date`;
+  @buf      = split(/\s+/,$tmp);
+  $Date     = "1 $buf[1] $buf[2] $buf[3] $buf[5]\n";
+
+  iv__Exit("Rve file exist, please delete, use '-overwrite' option, or give other name using '-rve' option:  $Rve")  if( -e $Rve && ! $RveOW );
+}
+
+
+
+
+#--------------------------------------------------#
+# Get rid of bad char for proper error-name.
+#--------------------------------------------------#
+sub get_error_name {
+  my $name=shift();
+
+
+  $name =~ s/</_lt_/g;
+  $name =~ s/>/_gt_/g;
+  $name =~ s/\s+|:|\/|-|\+|,/_/g;
+  $name =~ s/\{|\}//g;
+  $name =~ s/\(|\)|\[|\]/_/g;
+
+  return($name);
+}
+
+
+
+
+# --------------------------------------------------- #
+# Generate RVE file from ICV error file.
+# --------------------------------------------------- #
+sub gen_rve_icv {
+  my $fnd=$fnd2=$tmp=0;
+
+
+  open(FIN,$File) || iv__Exit("Could not open ICC file for reading:  $File");
+
+  iv__Info("Reading ICV error file: $File");
+
+  while( <FIN> ) {
+    $fnd2=1     if( /ERROR DETAILS/ );
+
+    if( /Structure name: / ) {
+      ($tmp,$tmp,$Blk)=split() if( /Structure name: / );
+
+      next()  if( ! defined($Blk) || length($Blk)<1 );
+
+      printf("\n-I- [$Bin]  Block name found:  $Blk\n\n");
+
+      $fnd = 1;
+
+      if( ! $Split ) {
+        open(FOT,">$Rve") || iv__Exit("Could not open file for writing:  $Rve");
+        printf(FOT "$Blk 1000\n");
+      }
+    }
+
+    next()  if( ! $fnd || ! $fnd2 );  # might need to add exceptions as we see them
+
+    if( /---------------------------------------------------------------------------/ ) { # after this is the error comment
+      get_errors(0);
+    }
+  }
+
+  close(FIN);
+
+  iv__Exit("Keywords not found:  'Structure name:  <blockName>'")  if( ! $fnd );
+
+  printf("\n-I- [$Bin]  Total errors sent to file:  $Total\n\n");
+
+  if( $Total == 0 ) {
+    system("rm -f $Rve")  if( -f $Rve );
+    return(0);
+  }
+
+  if( ! $Split ) {
+    close(FOT);
+    printf("-I- [$Bin]  File generated:  $Rve\n\n");
+  }
+}
+
+
+
+
+
+#--------------------------------------------------#
+# Get another error.
+#--------------------------------------------------#
+sub get_errors {
+  my $ant=shift(), $cmt="", ($idErr,$fnd)=(0,0);
+
+
+  while( <FIN> ) {
+    chomp();  # do not support multiple lines
+    last()  if( /---------------------------------------------------------------------------/ );
+    $cmt = "${cmt}$_";
+  }
+
+  if( @LstId ) { # only report on the error-IDs user wants
+    foreach my $rule ( @LstId ) { $fnd=1  if( $cmt=~/$rule/ ); }
+
+    return(0)  if( ! $fnd );
+  }
+
+  $idErr = get_id($cmt);
+  @EList = ();  # initialize
+  $poly  = get_error_drc(0,$cmt);
+ 
+  dump_error($poly,$idErr,$cmt)  if( @EList );
+}
+
+
+
+
+#--------------------------------------------------#
+# Get antenna error.
+#--------------------------------------------------#
+sub get_error_ant {
+  my $cmt=shift(), $lastErr=$poly=$start=$tmp=$cell=$x1=$y1=$x2=$y2=0;
+
+
+  while( <FIN> ) {
+    last()    if( $start && /^\s*$/ ); #  empty line
+    $start=1  if( /^Structure/ || /^Parent Struct/ );
+    next()    if( /In all instances of/i );
+
+    if( / \([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/ ) { # x,y
+      s/[\(|\)]|\,//g;
+      $lenWid = 0;
+      ($cell,$x1,$y1,$net,$lyr,$tmp,$val) = split();
+
+      ($cell,$lenWid,$lyr,$val,$x1,$y1)=split()  if( defined($x1) && ($x1 eq "LENGTH" || $x1 eq "WIDTH" ) );
+
+      if( $lenWid ) {
+        $da = "Layer $lyr\nValue $val\nType   $lenWid";
+      } else {
+        if( defined($val) ) { # get all netfilter values, to add to RVE
+          $da = "net  $net\n$lyr  $val";
+
+          while( <FIN> ) { # get all values
+            ($lyr,$tmp,$val) = split();
+            last()  if( /In all instances of/i );
+            if( ! defined($lyr) || length($lyr)<1 ) { $lastErr++; last(); } # for ICV, reached end of error section
+            $da = "$da\n$lyr  $val";
+          }
+        } else { # only 'net' is present
+          $da = "net  $net";
+        }
+      }
+
+      $x1 = $x1 * 1000;
+      $y1 = $y1 * 1000;
+      $x1 -= 50; $y1 -= 50;
+      $x2 = $x1 + 100; # small offset, minus, to cover 'gate'
+      $y2 = $y1 + 100; # small offset, minus, to cover 'gate'
+
+      $poly++;
+      $tmp = "p $poly 4\nCN $cell c 1 0 0 1 0 0";
+      $tmp = sprintf("$tmp\n$da\n%d %d\n%d %d\n%d %d\n%d %d\n",$x1,$y1,$x2,$y1,$x2,$y2,$x1,$y2);
+
+      @EList = (@EList,$tmp);
+
+      $Total++;
+
+      if( $Limit && $poly==$Limit  ) {
+        printf("-I- [$Bin]  Error generation limited to $Limit for:  %s\n",$cmt);
+        last();
+      }
+    }
+
+    last()  if( $lastErr ); # done with this error-code
+  }
+
+  return($poly);
+}
+
+
+
+
+#--------------------------------------------------#
+# Get DRC errors.
+#--------------------------------------------------#
+sub get_error_drc {
+  my ($den,$cmt)=@_;
+  my $poly=$start=$emptyLine=$da=$id=0;
+  $Analyze=$Waived=0;
+
+
+  while( <FIN> ) {
+    if( /net_select/ ) {
+      $poly += get_error_ant($cmt);
+      $emptyLine = 1;
+      next();
+    }
+
+    $Waived=0  if( /^\s*$/ );  # empty line, reset
+
+    if( /WARNING: The error count of/ ) { # warnings about error limit reached
+      while( <FIN> ) { last()  if( /- - - - - - - - - - - - - - - - - - - -/ ); } # reached 'Structure' of next error
+      next();
+    }
+
+    $Analyze=0    if( $emptyLine );  # completed errors
+    $Analyze=1    if( /:density$/ );  # density violation
+    $emptyLine=0  if( ! /^\s*$/   ); # no longer empty line
+    last()        if( $emptyLine && /^\s*$/ ); #  2nd straight empty line, end of error section
+    $emptyLine=1  if( $start     && /^\s*$/ ); #  empty line
+    $start=1      if( /^Structure/ || /^Parent Struct/ && / lower /); # Structure     ( lower left x, y )    ( upper right x, y )
+    $Waived=1     if( /\+ Errors classified as Waive/  );
+
+    if( /^[^\s]+\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/   ||
+        /^[^\s]+\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/ || 
+        /^\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/   ||
+        /^\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/   )  { # from TOP_LAYOUT_ERRORS
+      $top=0;
+      $top=1  if( /^\(/ ); # TOP_LAYOUT_ERRORS
+      s/[\(|\)]|\,|=//g;
+
+      if( $top ) {
+         $cell = $Blk;  # always top-level
+        ($x1,$y1,$x2,$y2,$ratio,$area) = split();
+      } else {
+        ($cell,$x1,$y1,$x2,$y2,$ratio,$area) = split();
+      }
+
+      $emptyLine = 0;
+
+      next()  if( $TopOnly && $cell ne $Blk );  ## only getting top-level errors
+      next()  if( $x1 eq "HFLIGHTLINE" );  # ICV grid check, skip for now
+      next()  if( $x1 !~ /\d+/ || $y1 !~ /\d+/ || $x2 !~ /\d+/ || $y2 !~ /\d+/ );  # some other issue to look at later
+
+      if( defined($y2) && length($y2)>0 ) {
+        $x1 = $x1 * 1000;
+        $x2 = $x2 * 1000;
+        $y1 = $y1 * 1000;
+        $y2 = $y2 * 1000;
+
+if( $x1==1785550 && $y1==381900 ) {
+  sleep(1);
+}
+        if( $Analyze ) {  # get all variables involved
+          if( ! defined($area) || length($area)==0 ) { while( <FIN> ) { ($ratio,$tmp,$area) = split(); last(); } } # get from next line
+
+          $da = "$ratio $area";
+          $lastPos = tell(FIN); # so that we can go back to error, if after ratio-values
+
+          while( <FIN> ) {
+            ($id,$tmp,$val) = split();
+
+            if( ! defined($val) || length($val)==0 ) { 
+              $emptyLine=1; last(); 
+             } # end for this error
+
+            if( /^[^\s]+\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/   ||
+                /^[^\s]+\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/ ||
+                /^\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/         ||
+                /^\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)\s+\([-]?\d+\.\d+\,\s+[-]?\d+\.\d+\)/ ) { 
+              seek(FIN,$lastPos,0); last(); 
+            } # found another error in next line
+
+            $lastPos = tell(FIN); # so that we can go back to error, if right after ratio-values
+            $da = "$da\n$id $val";
+          }
+        }
+
+        $poly ++;
+        $tmp = "p $poly 4\nCN $cell c 1 0 0 1 0 0";
+
+#       $tmp = "$tmp\nratio $ratio\narea $area"  if( $den     );
+        $tmp = "$tmp\n$da"                       if( $Analyze );
+        $tmp = "$tmp\nWAIVED yes"                if( $Waived  );
+
+        $tmp = sprintf("$tmp\n%d %d\n%d %d\n%d %d\n%d %d\n",$x1,$y1,$x2,$y1,$x2,$y2,$x1,$y2);
+        @EList = (@EList,$tmp);
+
+        $Total ++;
+
+        if( $Limit && $poly==$Limit  ) {
+          printf("-I- [$Bin]  Error generation limited to $Limit for:  %s\n",$cmt);
+          last;
+        }
+      }
+    }
+  }
+
+  return($poly);
+}
+
+
+
+#--------------------------------------------------#
+# Extract red-book id if present. Id is within the
+# comments, example:
+#
+#   COMMENT = "(H43) M2 nub error"
+# or
+#   <id>:  M2 nub error
+#--------------------------------------------------#
+sub get_id {
+  my $id="ERROR", ($cmt)=@_;
+
+
+# if( $cmt =~ /^\w+\d+[\/\w+\d+]:/ ) { # for newer processes:  ^<word>: <comment>
+  if( $cmt =~ /:/ ) { # for newer processes:  ^<word>: <comment>
+    ($id) = split(/:/,$cmt);
+  } else {
+    if( $cmt =~ /\(\w\d+\)/ ) {
+      ($id) =  split(/\) /,$cmt);
+      $id   =~ s/\(|^\s+//g;
+    } else {
+      $id =  $cmt;
+      $id =~ s/</_lt_/g;
+      $id =~ s/>/_gt_/g;
+      $id =~ s/\s+/_/g;
+    }
+  }
+
+  if( $HashErrorId{$id} ) {
+    $id ="${ErrorCnt}.${id}";
+    $ErrorCnt++;
+  }
+
+  $HashErrorId{$id} = 1;  # keep track, so that we can separate the duplicate ones
+  return($id);
+}
+
+
+
+#--------------------------------------------------#
+# Dump the errors.
+#--------------------------------------------------#
+sub dump_error {
+  my ($ndx,$title);
+  my ($poly,$id,$cmt)=@_;
+
+ 
+  $title = $id;
+  $id =~ s/"|:|=|\(|\)|\//_/g;
+
+  if( $Split ) {
+    $id  = substr($id,0,20);  # limit filenames
+    $ndx = rindex($id,"_");
+    $ndx = 20  if( $ndx<10 );  # not too small
+    $id  = substr($id,0,$ndx);  # limit filenames
+
+    open(FOT1,">${Script}.${id}.rve") || iv__Exit("Could not open file for writing:  ${Script}.${id}.rve");
+    printf(FOT1 "$Blk 1000\n");
+    printf(FOT1 "$title\n$poly $poly $Date%s\n",$cmt);
+    foreach my $coor (@EList ) { printf(FOT1 $coor); }
+    printf("-I- [$Bin]  File generated:  ${Script}.${id}.rve\n\n");
+    close(FOT1);
+  } else {
+    $id=~s/\%/-percent/g;
+    printf(FOT "$id\n$poly $poly $Date%s\n",$cmt);
+    foreach my $coor (@EList ) { printf(FOT $coor); }
+  }
+}
+
+
+
+
+#--------------------------------------------------#
+# display help.
+#--------------------------------------------------#
+sub show_help {
+  printf("
+-----------| Version: $Version\n
+Function: Generate an RVE error file from ICV error file.
+
+Syntax:  $Bin -icv <errFile> [-lmt <number>]  [-split] [-ids <id1>,<id2>,<idX>]
+
+Options: -err <fileName>    IC Validator error file (.LAYOUT_ERRORS)
+         -lmt <#>           limit the errors sent to file by specific number [default: 1000]
+         -ids <string>      only output errors which contain specific keyword IDs (example, NW_21)
+         -rve <fileName>    output name of RVE file to generate  [default:  <input-file>.rve]
+
+         -split      split each error type into a separate file
+         -nolimit    do not limit errors (parse all)
+         -overwrite  overwrite existing RVE file (if it exists)
+
+         -top_only   only process top-level block errors  [default: process all]
+
+
+Example:  $Bin  -icv fc.LAYOUT_ERRORS  -lmt 25000 -ids M1_02,M2_05,M4_35
+\n-----------| Support: $Support\n\n");
+
+  exit(0);
+}
+
+
+
+#--------------------------------------------------#
+# Return full path to file.
+#--------------------------------------------------#
+use Cwd;
+
+sub iv__Info  { printf("-I- [$Bin]  @_\n"); }
+sub iv__Warn  { printf("-W- [$Bin]  @_\n"); }
+sub iv__Error { printf("-E- [$Bin]  @_\n"); }
+sub iv__Exit  { printf("\n"); iv__Error("@_\n"); exit(1); }
+
+
+sub iv__FileGetFullPath {
+  my ($file)=@_;
+  my $tmp;
+
+
+  return($file)  if( index($file,"/")==0 );
+
+  $tmp  =  getcwd();
+  $file = "$tmp/$file";
+
+  return($file);
+}
+
+
+# --------------------------------------------------- #
+# Return directory name of where file resides.
+# --------------------------------------------------- #
+sub iv__FileGetDir {
+  my ($file)=@_;
+  my ($ndx,$dir);
+
+
+  $ndx = rindex($file,"/");
+
+  if( $ndx>0  ) { $dir = substr($file,0,$ndx); }
+  else          { $dir = getcwd();             }
+
+  return($dir);
+}
+
+
+# --------------------------------------------------- #
+# Return filename, from complete path, for example:
+#  input:  /nfs/../filename.ext
+# output:  filename.ext
+# --------------------------------------------------- #
+sub iv__FileGetName {
+  my ($file)=@_;
+  my ($ndx,$name);
+
+
+  $ndx = rindex($file,"/");
+
+  if( $ndx>0  ) { $name = substr($file,$ndx+1,1000); }
+  else          { $name = $file;                     }
+
+  return($name);
+}
+
+#--------------------------------------------------#
+# Create working directory.
+#--------------------------------------------------#
+sub iv__WorkingDir {
+  my ($dir)=@_;
+  my $fullpath=$dir, $prev="${dir}.previous";
+
+
+  if( -e $prev ) {
+    iv__Info("Removing old previous working directory:  $prev");
+    system("rm -rf $prev");
+  }
+
+  iv__Exit("Could not remove existing dir:  $prev")  if( -e $prev );
+
+  if( -e $dir ) {
+    iv__Info("Moving previous working directory\n     From:  $dir\n       To:  $prev");
+    system("mv $dir $prev");
+  }
+
+  iv__Exit("Could not move existing dir: $dir to $prev") if( -e $dir );
+
+  system("mkdir -p $dir");
+  iv__Exit("Could not create dir:  $dir") if( ! -e $dir );
+  $fullpath = getcwd() . "/$dir"  if( $dir!~/^\// );
+  iv__Info("Current working directory has been set to:  $fullpath\n");
+}
+
+
+#--------------------------------------------------#
+# Which's perl implementation.
+#--------------------------------------------------#
+sub iv__which {
+  my $found=0, $exe=shift;
+
+
+  foreach my $path ( split(/:/,$ENV{'PATH'}) ) {
+    my $binary = "$path/$exe";
+
+    if( -e $binary && -x $binary ) {
+      $found = $binary;
+      last;
+    }
+  }
+
+  return($found);
+}
+

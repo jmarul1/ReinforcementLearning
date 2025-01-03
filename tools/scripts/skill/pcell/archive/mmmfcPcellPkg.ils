@@ -1,0 +1,148 @@
+procedure(intel22MfcPCellCore()
+let( ()
+
+;; LAYOUT BUILD
+  procedure(buildMfc(cv botLayer nx ny)
+  let( (paramLst mfc botNum)
+    nx = cdfParseFloatString(nx) ny = cdfParseFloatString(ny) pcreMatchp("m(\\d+)" botLayer) botNum = pcreSubstitute("\\1")
+;    when(botNum == "5" botNum = "4")
+    ; array the values using intel22custom
+    paramLst = list(list("multX" "string" numToStr(2*nx)) list("multY" "string" numToStr(2*ny)) list("mbot" "string" botNum)
+                    list("mtop" "string" "5")  list("w" "string" "1.72u") list("l" "string" "1.36u"))
+    mfc = dbCreateParamInstByMasterName(cv "intel22custom" "mfc_s2s_ns" "layout" nil 0:0 "R0" 1 paramLst)
+    ; add connectors and pins
+    buildConnectors(cv nx ny)
+    ; add Fill
+    addFill(cv nx ny)
+    ;; chkBoundary
+    dbCreatePRBoundary(cv listBBox(mfc~>master~>prBoundary~>bBox))
+    ; if botLayer remove M4/V4
+    when(botLayer == "m5" postProcessForM5(cv mfc))
+  ));let;proc
+
+  
+  procedure(buildConnectors(cv nx ny)
+  let( (points my boxes (offX 3.24) (offY 2.52) shapes)
+  points = list(1.46:0.157 0.08:0.157 0.08:0.293 1.46:0.293 1.46:0.337 0.08:0.337 0.08:0.473 1.46:0.473 1.46:0.517 0.08:0.517 0.08:0.653 1.46:0.653 1.46:0.697 0.08:0.697 0.08:0.833 1.46:0.833 1.46:0.877 0.08:0.877 0.08:1.013 1.46:1.013 1.46:1.057 0.08:1.057 0.08:1.215 1.46:1.215 1.46:1.305 0.08:1.305 0.08:1.463 1.46:1.463 1.46:1.507 0.08:1.507 0.08:1.643 1.46:1.643 1.46:1.687 0.08:1.687 0.08:1.823 1.46:1.823 1.46:1.867 0.08:1.867 0.08:2.003 1.46:2.003 1.46:2.047 0.08:2.047 0.08:2.183 1.46:2.183 1.46:2.227 0.08:2.227 0.08:2.363 1.46:2.363 1.46:2.407 0.08:2.407 0.08:2.565 -0.08:2.565 -0.08:-0.045 0.08:-0.045 0.08:0.113 1.46:0.113)
+  my = dbCreatePolygon(cv list("m6" "drawing") points) shapes = tconc(shapes my)
+  shapes = tconc(shapes dbCopyFig(my cv list(offX:0 "MY" 1)) )
+  points = list(3.08:0.045 1.7:0.045 1.7:0.203 3.08:0.203 3.08:0.247 1.7:0.247 1.7:0.383 3.08:0.383 3.08:0.427 1.7:0.427 1.7:0.563 3.08:0.563 3.08:0.607 1.7:0.607 1.7:0.743 3.08:0.743 3.08:0.787 1.7:0.787 1.7:0.923 3.08:0.923 3.08:0.967 1.7:0.967 1.7:1.103 3.08:1.103 3.08:1.147 1.7:1.147 1.7:1.373 3.08:1.373 3.08:1.417 1.7:1.417 1.7:1.553 3.08:1.553 3.08:1.597 1.7:1.597 1.7:1.733 3.08:1.733 3.08:1.777 1.7:1.777 1.7:1.913 3.08:1.913 3.08:1.957 1.7:1.957 1.7:2.093 3.08:2.093 3.08:2.137 1.7:2.137 1.7:2.273 3.08:2.273 3.08:2.317 1.7:2.317 1.7:2.475 3.08:2.475 3.08:2.565 0.16:2.565 0.16:2.475 1.54:2.475 1.54:2.317 0.16:2.317 0.16:2.273 1.54:2.273 1.54:2.137 0.16:2.137 0.16:2.093 1.54:2.093 1.54:1.957 0.16:1.957 0.16:1.913 1.54:1.913 1.54:1.777 0.16:1.777 0.16:1.733 1.54:1.733 1.54:1.597 0.16:1.597 0.16:1.553 1.54:1.553 1.54:1.417 0.16:1.417 0.16:1.373 1.54:1.373 1.54:1.147 0.16:1.147 0.16:1.103 1.54:1.103 1.54:0.967 0.16:0.967 0.16:0.923 1.54:0.923 1.54:0.787 0.16:0.787 0.16:0.743 1.54:0.743 1.54:0.607 0.16:0.607 0.16:0.563 1.54:0.563 1.54:0.427 0.16:0.427 0.16:0.383 1.54:0.383 1.54:0.247 0.16:0.247 0.16:0.203 1.54:0.203 1.54:0.045 0.16:0.045 0.16:-0.045 3.08:-0.045)
+  shapes = tconc(shapes dbCreatePolygon(cv list("m6" "drawing") points) )
+  boxes= list( list(0.551:-0.035 0.621:0.035) list(0.191:-0.035 0.261:0.035) list(0.371:-0.035 0.441:0.035) list(0.731:-0.035 0.801:0.035) list(0.911:-0.035 0.981:0.035) list(0.826:0.203 0.884:0.247) list(1.006:0.203 1.064:0.247) list(0.646:0.203 0.704:0.247) list(0.466:0.203 0.524:0.247) list(0.286:0.203 0.344:0.247) list(-0.035:0.19 0.035:0.26) list(0.196:0.293 0.254:0.337) list(0.736:0.293 0.794:0.337) list(0.556:0.293 0.614:0.337) list(0.916:0.293 0.974:0.337) list(0.376:0.293 0.434:0.337) list(0.466:0.383 0.524:0.427) list(0.826:0.383 0.884:0.427) list(0.646:0.383 0.704:0.427) list(0.286:0.383 0.344:0.427) list(1.006:0.383 1.064:0.427) list(-0.035:0.37 0.035:0.44) list(0.556:0.473 0.614:0.517) list(0.196:0.473 0.254:0.517) list(0.736:0.473 0.794:0.517) list(0.376:0.473 0.434:0.517) list(0.916:0.473 0.974:0.517) list(0.466:0.563 0.524:0.607) list(0.646:0.563 0.704:0.607) list(1.006:0.563 1.064:0.607) list(0.286:0.563 0.344:0.607) list(0.826:0.563 0.884:0.607) list(-0.035:0.55 0.035:0.62) list(0.556:0.653 0.614:0.697) list(0.916:0.653 0.974:0.697) list(0.196:0.653 0.254:0.697) list(0.376:0.653 0.434:0.697) list(0.736:0.653 0.794:0.697) list(0.286:0.743 0.344:0.787) list(0.466:0.743 0.524:0.787) list(0.646:0.743 0.704:0.787) list(0.826:0.743 0.884:0.787) list(1.006:0.743 1.064:0.787) list(-0.035:0.73 0.035:0.8) list(1.271:-0.035 1.341:0.035) list(1.091:-0.035 1.161:0.035) list(1.366:0.203 1.424:0.247) list(1.186:0.203 1.244:0.247) list(1.096:0.293 1.154:0.337) list(1.276:0.293 1.334:0.337) list(1.585:0.28 1.655:0.35) list(1.585:0.28 1.655:0.35) list(1.366:0.383 1.424:0.427) list(1.186:0.383 1.244:0.427) list(1.276:0.473 1.334:0.517) list(1.096:0.473 1.154:0.517) list(1.585:0.46 1.655:0.53) list(1.585:0.46 1.655:0.53) list(1.366:0.563 1.424:0.607) list(1.186:0.563 1.244:0.607) list(1.276:0.653 1.334:0.697) list(1.096:0.653 1.154:0.697) list(1.585:0.64 1.655:0.71) list(1.585:0.64 1.655:0.71) list(1.186:0.743 1.244:0.787) list(1.366:0.743 1.424:0.787) list(1.585:0.82 1.655:0.89) list(1.585:0.82 1.655:0.89) list(0.376:0.833 0.434:0.877) list(0.916:0.833 0.974:0.877) list(0.196:0.833 0.254:0.877) list(0.736:0.833 0.794:0.877) list(0.556:0.833 0.614:0.877) list(0.286:0.923 0.344:0.967) list(0.466:0.923 0.524:0.967) list(0.646:0.923 0.704:0.967) list(0.826:0.923 0.884:0.967) list(1.006:0.923 1.064:0.967) list(-0.035:0.91 0.035:0.98) list(0.556:1.013 0.614:1.057) list(0.196:1.013 0.254:1.057) list(0.376:1.013 0.434:1.057) list(0.916:1.013 0.974:1.057) list(0.736:1.013 0.794:1.057) list(1.276:0.833 1.334:0.877) list(1.096:0.833 1.154:0.877) list(1.186:0.923 1.244:0.967) list(1.366:0.923 1.424:0.967) list(1.276:1.013 1.334:1.057) list(1.096:1.013 1.154:1.057) list(1.585:1.0 1.655:1.07) list(1.585:1.0 1.655:1.07) list(0.461:1.225 0.531:1.295) list(1.001:1.225 1.071:1.295) list(0.821:1.225 0.891:1.295) list(0.281:1.225 0.351:1.295) list(0.641:1.225 0.711:1.295) list(0.281:1.225 0.351:1.295) list(0.641:1.225 0.711:1.295) list(0.461:1.225 0.531:1.295) list(1.001:1.225 1.071:1.295) list(0.821:1.225 0.891:1.295) list(1.361:1.225 1.431:1.295) list(1.181:1.225 1.251:1.295) list(1.361:1.225 1.431:1.295) list(1.181:1.225 1.251:1.295) )
+  foreach(bb boxes 
+    shapes = tconc(shapes dbCreateRect(cv list("v5" "drawing") bb))
+    shapes = tconc(shapes dbCreateRect(cv list("v5" "drawing") dbTransformBBox(bb list(offX:0 "MY" 1))) )
+    shapes = tconc(shapes dbCreateRect(cv list("v5" "drawing") dbTransformBBox(bb list(0:offY "MX" 1)))    )
+    shapes = tconc(shapes dbCreateRect(cv list("v5" "drawing") dbTransformBBox(bb list(offX:offY "R180" 1)))        )
+    );foreach
+  boxes = list(list(-0.06:0.43 0.06:0.83)  list(1.56:1.69 1.68:2.09) );list(1.56:1.99 1.68:2.19) list(3.18:0.33 3.3:0.53) list(3.18:0.73 3.3:0.93))
+  foreach(bb boxes shapes = tconc(shapes dbCreateRect(cv list("v6" "drawing") bb)) )
+  boxes = list(list(-0.27:1.53 3.51:2.25) list(-0.27:0.27 3.51:0.99))
+  foreach(bb boxes shapes = tconc(shapes dbCreateRect(cv list("m7" "drawing") bb)) )
+  shapes = tconc(shapes rodCreateRect(?cvId cv ?layer list("m7" "pin") ?bBox car(boxes) ?pin t ?netName "p" ?pinLabel t ?pinLabelHeight 0.5)~>dbId) 
+  shapes = tconc(shapes rodCreateRect(?cvId cv ?layer list("m7" "pin") ?bBox cadr(boxes) ?pin t ?netName "n" ?pinLabel t ?pinLabelHeight 0.5)~>dbId)
+  shapes = car(shapes) nx=pcFix(nx) ny=pcFix(ny)
+  when(nx > 1 || ny > 1
+    for(nnx 0 nx-1
+     for(nny 0 ny-1 
+       foreach(cc shapes dbCopyFig(cc cv list(nnx*3.24:nny*2.52 "R0" 1))) ) ) )
+  t )) 
+
+  procedure(postProcessForM5(cv mfc)
+  let( (shapes)
+    dbFlattenInst(mfc 1 t nil)
+    shapes = setof(ii cv~>shapes ii~>layerName == "v4" || ii~>layerName == "m4")
+    mapc('dbDeleteObject shapes)
+  ))
+;;; CDF Callbacks
+  procedure(fixMfcParamsCB(whoCalled cdfId)
+  let( (nx ny botLayer stop result cdfP cap size (upScale 1.324))
+    ; convert to number and to microns
+    nx = aelEval(cdfId~>nx~>value ?minimum 1 ?maximum 100 ?default cdfParseFloatString(cdfId~>nx~>defValue)) 
+    ny = aelEval(cdfId~>ny~>value ?minimum 1 ?maximum 100 ?default cdfParseFloatString(cdfId~>ny~>defValue))
+    botLayer = cdfId~>botLayer~>value   
+    stop = nil
+    ; find who call and correct
+      case(whoCalled
+      ("nx" result = pcFix(nx))
+      ("ny" result = pcFix(ny))      
+      (t stop=t)
+      )
+    ; replace the parameter
+    unless(stop
+      ; convert to string and attach units
+      cdfP = cdfFindParamByName(cdfId whoCalled)  
+      result = sprintf(nil "%d" result)
+      putprop(cdfP result "value") );unless
+    ; update the capValue, cellSize
+    cap = getMfcVal(botLayer)*nx*ny*upScale cdfP=cdfFindParamByName(cdfId "cap") putprop(cdfP strcat(aelEval(cap*1e15 ?str t) "f") "value") 
+    size = strcat(numToStr(nx*2.52) " x " numToStr(ny*2.52)) cdfP=cdfFindParamByName(cdfId "cellSize") putprop(cdfP size "value") 
+  t))
+
+  procedure(addFill(cv nx ny) 
+  let( (tgt)
+    tgt = dbOpenCellViewByType("p1222_fillers" "p1222_filler_fe" "layout")
+    dbCreateSimpleMosaic(cv tgt nil 0:0 "R0" pcFix(4*ny) pcFix(6*nx) 0.63 0.54)
+  ) )
+
+  procedure(getMfcVal(botLayer)
+  case(botLayer
+  ("m1" 27.383f)
+  ("m2" 21.881f)
+  ("m3" 16.061f)
+  ("m4" 10.277f)
+  ("m5" 4.491f)  
+  ))
+  
+;;; GENERIC FNS  
+  procedure(aelEval(entry @key (minimum nil) (maximum nil) (default nil) (grid nil) (str nil)) ;default is assumed correct && on grid
+  let( (out)
+   when((minimum && grid) minimum = ceiling(minimum/grid)*grid)
+   when((maximum && grid) maximum = floor(maximum/grid)*grid)
+   when(type(entry)=='string entry = cdfParseFloatString(entry))
+   default = (default || minimum || entry)
+   if(numberp(entry) then
+     cond( 
+       ( (minimum && entry < minimum)  out = minimum)
+       ( (maximum && entry > maximum)  out = maximum)
+       (t out = entry)
+       )
+     when(grid out=round(out/grid)*grid)   
+   else out = default
+   )
+   when(str out=sprintf(nil "%L" out))
+  out))
+
+  procedure(dotToP(num)
+  num = pcreReplace(pcreCompile("\\.") numToStr(num) "p" 0)  )
+
+  procedure(numToStr(numberGiven @optional (precision 6) )
+  let( ()
+    if(numberp(precision) then
+      sprintf(precision "%d" fix(precision)) 
+    else 
+      sprintf(precision "%d" fix(6))
+    ) ; if
+    case(type(numberGiven)
+      (fixnum sprintf(numberGiven "%d" numberGiven))
+      (flonum sprintf(numberGiven strcat("%." precision "f") float(numberGiven)))
+      (t numberGiven)
+    ) ; case
+    when(rexMatchp("[0-9]*\\." numberGiven )
+      while(rexMatchp("0$" numberGiven) numberGiven = rexReplace(numberGiven "" 1)) ; while to remove extra "0s"
+      when(rexMatchp("\\.$" numberGiven) numberGiven = rexReplace(numberGiven "" 1) ) ; when to make integer for ".0"
+    ) ; when
+    numberGiven
+  )) ; procedure
+  
+  procedure(listBBox(bBoxGiven)
+  let( (leftBotX leftBotY rightTopX rightTopY)
+    leftBotX = caar(bBoxGiven)
+    leftBotY = cadar(bBoxGiven)
+    rightTopX = caadr(bBoxGiven)
+    rightTopY = cadadr(bBoxGiven)
+    list(list(leftBotX leftBotY) list(leftBotX rightTopY) list(rightTopX rightTopY) list(rightTopX leftBotY) )
+  )) ; procedure
+  
+list(nil 'buildMfc buildMfc 'fixMfcParamsCB fixMfcParamsCB)
+))

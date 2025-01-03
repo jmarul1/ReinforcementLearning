@@ -1,0 +1,432 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# *****************************************************************************/
+#
+#/******************************************************************************
+# * Filename: macroPrestoFormatter
+# * Overview: Put inductor macro-models into the Presto format
+# * Date:     Q2, 2007
+# *****************************************************************************/
+
+use strict;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+sub diff {
+  my ($QSP, $temp) = @_;
+  my %res;
+  open RES, "diff -u $$QSP[0] $$QSP[1] |";
+  while (<RES>) {
+    s/_SHORTED_BY_RIDE//;
+    if (/^([-+])([RLCK]\S+)\s*n\d+\s*n\d+\s*(\S+)/) {
+      my $t = $1 eq "-" ? $$temp[0] : $$temp[1];
+      $res{$2}{$t} = $3;
+    }
+  }
+  close RES;
+  foreach my $key (keys %res) {
+    my $deltaT = $$temp[1] - $$temp[0];
+    $res{$key}{room} = ( ($$temp[1] - 25) * $res{$key}{$$temp[0]} + 
+                         (25 - $$temp[0]) * $res{$key}{$$temp[1]} ) / $deltaT;
+    $res{$key}{tc} = ($res{$key}{$$temp[1]} / $res{$key}{$$temp[0]} - 1) / $deltaT;
+  }
+  return (%res);
+}
+
+my %optctl;
+#my $macroOpt = "/usr/tcad/RFDesigner/ride/latest/scripts/rideMacroOpt";
+my $macroOpt = "$ENV{HOME}/tcad/ride/scripts/rideMacroOpt";
+&GetOptions(\%optctl, 'help', 'macroOpt=s', 'ckt=s');
+
+if ($#ARGV != 1 || $optctl{"help"}) {
+  print <<EOF;
+Usage: macroPrestoFormatter [options] <directory> <model string>
+where directory includes S-parameter files of the form:
+  basename_lowQ_t#.s2p,
+  basename_highQ_t#.s2p,
+  basename_typical_t#.s2p
+and # are temperatures that should occur in pairs such as 25 and 110.
+
+This script starts from S-parameters and generates macro-models 
+
+Options: [-help|-h]         This message
+         [-macroOpt path]   Specify RIDE wrapper for macro optimization
+         [-ckt path]        Path to find circuit topologies for RIDE
+EOF
+  exit(0);
+}
+
+if (!-x $macroOpt) { 
+  die "ERROR: Cannot find rideMacroOpt. Try specifying via -macroOpt.\n";
+}
+
+my %opens = (
+  "L" => "cannot_open_for_all_frequencies",
+  "R" => 1.0E+07,
+  "C" => 1.0E-25
+);
+
+my %shorts = (
+  "L" => 1.0E-25,
+  "R" => 1.0E-06,
+  "C" => "cannot_short_for_all_frequencies"
+);
+
+my %trans = (
+  0 => "vss_special",
+  1 => "p",
+  2 => "n",
+  3 => "ct"
+);
+
+my $tag = $ARGV[1];
+my @typQSP = glob "$ARGV[0]/*_typical*_t*.s[23]p";
+my @lowQSP = glob "$ARGV[0]/*_lowQ*_t*.s[23]p";
+my @highQSP = glob "$ARGV[0]/*_highQ*_t*.s[23]p";
+my @temp = map {/_t(\d+)\./} @typQSP;
+
+die "ERROR: The S-parameters are inconsistent.\n"
+  if ($#typQSP != 1
+      or $#lowQSP != 1
+      or $#highQSP != 1
+      or $#temp != 1);
+
+my $files = $typQSP[0] . " " . $typQSP[1] . " " .
+            $lowQSP[0] . " " . $lowQSP[1] . " " .
+            $highQSP[0] . " " . $highQSP[1];
+
+my $cktBase = "/usr/tcad/RFDesigner/ride/latest/circuits";
+my $ckt;
+my $macCmdLine = "";
+if (defined $optctl{ckt}) {
+  $cktBase = $optctl{ckt};
+  $macCmdLine = "-ckt $cktBase";
+}
+
+my $s3p = ($typQSP[0] =~ /.s3p/) ? 1 : 0;
+if ($s3p) {
+  $ckt = "$cktBase/distributed_3port.ckt";
+} else {
+  $ckt = "$cktBase/distributed_pi.ckt";
+}
+
+# Temperature for the spice file.
+print "-I- Temperatures are $temp[0] and $temp[1] deg C.\n";
+
+if ($temp[1] < $temp[0]) {
+  @typQSP = reverse @typQSP;
+  @lowQSP = reverse @lowQSP;
+  @highQSP = reverse @highQSP;
+  @temp = reverse @temp;
+}
+
+# Curve-fit at each point.
+foreach my $sparam ($typQSP[0], $lowQSP[0], $highQSP[0])
+{
+  print "-I- >>> Fitting $sparam\n";
+  !system "$macroOpt $macCmdLine $sparam 2>&1 | tee -a $ARGV[0]/fitting.log"
+    or die "ERROR: Fitting failed.\n";
+}
+
+# Curve fit by using earlier solution as a starting point
+foreach my $sparam ($typQSP[1], $lowQSP[1], $highQSP[1])
+{
+  print "-I- >>> Fitting $sparam\n";
+  my $spFile = $sparam;
+  $spFile =~ s/_t(\d+)/_t$temp[0]/;
+  $spFile =~ s/\.s[23]p$/.sp/;
+  # This does not seem to work as well as it should.
+  #my $copy = "-copy $spFile -retain 'RS1,RS2,RS3,RS4,R1B,R2B,R3B,L1B,L2B,L3B'";
+  my $copy = "-copy $spFile -retain 'RS1,RS2,RS3,RS4,R1B,R2B,R3B'";
+  !system "$macroOpt $macCmdLine $copy $sparam 2>&1 | tee -a $ARGV[0]/fitting.log"
+    or die "ERROR: Fitting failed.\n";
+}
+
+$files =~ s/\.s[23]p/.sp/g;
+
+my $header = "\nPost-formatted RIDE-generated inductor model: $tag\n";
+$header .= "Time stamp: ";
+$header .= `/bin/date`;
+$header .= `/usr/bin/md5sum $files`;
+$header =~ s/^/* /g;
+$header =~ s/\n/\n* /g;
+$header .= "\n";
+
+$typQSP[1] =~ s/\.s[23]p/.sp/;
+$lowQSP[1] =~ s/\.s[23]p/.sp/;
+$highQSP[1] =~ s/\.s[23]p/.sp/;
+$typQSP[0] =~ s/\.s[23]p/.sp/;
+$lowQSP[0] =~ s/\.s[23]p/.sp/;
+$highQSP[0] =~ s/\.s[23]p/.sp/;
+
+my %tempElm;
+
+my (%typD) = diff(\@typQSP, \@temp);
+my (%lowD) = diff(\@lowQSP, \@temp);
+my (%highD) = diff(\@highQSP, \@temp);
+
+foreach my $key (keys %typD) { $header .= "* typ($key) => $typD{$key}{$temp[0]} -> $typD{$key}{$temp[1]} room=$typD{$key}{room} tc=$typD{$key}{tc}\n"; }
+foreach my $key (keys %lowD) { $header .= "* low($key) => $lowD{$key}{$temp[0]} -> $lowD{$key}{$temp[1]} room=$lowD{$key}{room} tc=$lowD{$key}{tc}\n"; }
+foreach my $key (keys %highD) { $header .= "* high($key) => $highD{$key}{$temp[0]} -> $highD{$key}{$temp[1]} room=$highD{$key}{room} tc=$highD{$key}{tc}\n"; }
+$header .= "\n";
+
+open CKT, "<$ckt" or die "Error: Cannot open $ckt.\n";
+
+my %elms;
+
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    $elms{ $prm[0] } = [ $prm[1], $prm[2] ];
+  }
+}
+close CKT;
+
+my $twoPort = 1;
+
+# Typical circuit values
+my %typical;
+
+open CKT, "< $typQSP[0]" or die "Error: Cannot open $typQSP[0].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/.subckt/)
+  {
+    my @prm = split;
+    $twoPort = 0 if ($#prm > 4); # Must be three-port
+  }
+  elsif (/^[CRLK]/)
+  {
+    my @prm = split;
+    my $val = $prm[3];
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in typical circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+      $val = $typD{$1}{room} if (exists $typD{$1});
+    }
+    $typical{ $prm[0] } = $val;
+  }
+}
+close CKT;
+
+# Handle two-port
+if ($twoPort)
+{
+  delete $trans{3};
+}
+
+# Low-Q circuit values
+my %lowQ;
+
+open CKT, "< $lowQSP[0]" or die "Error: Cannot open $lowQSP[0].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    my $val = $prm[3];
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in low-Q circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+      $val = $lowD{$1}{room} if (exists $typD{$1});
+    }
+    $lowQ{ $prm[0] } = $val;
+  }
+}
+
+# High-Q circuit values
+my %highQ;
+
+open CKT, "< $highQSP[0]" or die "Error: Cannot open $highQSP[0].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    my $val = $prm[3];
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in high-Q circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+      $val = $highD{$1}{room} if (exists $highD{$1});
+    }
+    $highQ{ $prm[0] } = $val;
+  }
+}
+close CKT;
+
+# Complete with open items
+
+foreach my $elm (keys %elms)
+{
+  my $allThree = 1;
+
+  if (not defined $typical{ $elm })
+  {
+    print "-I- Handling open $elm in typical circuit.\n";
+    $typical{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if (not defined $lowQ{ $elm })
+  {
+    print "-I- Handling open $elm in low-Q circuit.\n";
+    $lowQ{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if (not defined $highQ{ $elm })
+  {
+    print "-I- Handling open $elm in high-Q circuit.\n";
+    $highQ{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if ($allThree)
+  {
+    print "-I- $elm does not exist in all skews.\n";
+    delete $highQ{ $elm };
+    delete $lowQ{ $elm };
+    delete $typical{ $elm };
+  }
+}
+
+print "-I- Outputting $tag.sp.\n";
+open CKT, "> $tag.sp" or die "Error: Cannot open $tag.sp.\n";
+print CKT "$header";
+
+print CKT ".subckt $tag $trans{1} $trans{2} ";
+if ($twoPort)
+{
+  #print CKT "$trans{0}\n";
+  print CKT "\n";
+}
+else
+{
+  #print CKT "$trans{3} $trans{0}\n";
+  print CKT "$trans{3}\n";
+}
+print CKT ".param shrink=1\n";
+
+print CKT ".param $tag\_skew = 0\n\n";
+
+foreach my $elm (keys %typical)
+{
+  print CKT ".param $tag\_$elm\t=\t$typical{$elm}\n";
+  if (exists $typD{$elm}) {
+    print CKT ".param $tag\_$elm\_TC\t=\t$typD{$elm}{tc}\n";
+  }
+}
+print CKT "\n";
+
+foreach my $elm (keys %typical)
+{
+  my ($n0, $n1);
+  if (defined $trans{$elms{$elm}[0]})
+  {
+    $n0 = $trans{$elms{$elm}[0]};
+  }
+  else
+  {
+    $n0 = "n$elms{$elm}[0]";
+  }
+  if (defined $trans{$elms{$elm}[1]})
+  {
+    $n1 = $trans{$elms{$elm}[1]};
+  }
+  else
+  {
+    $n1 = "n$elms{$elm}[1]";
+  }
+  my $type = substr($elm, 0, 1);
+  if (exists $typD{ $elm }) {
+    print CKT "$elm\t$n0\t$n1\t\t$type=$tag\_$elm TC1=$tag\_$elm\_TC\n";
+  } else {
+    print CKT "$elm\t$n0\t$n1\t\t$type=$tag\_$elm\n";
+  }
+}
+print CKT "rdummy dummy dummy r=shrink*$tag\_skew\n";
+print CKT "\n.ends\n";
+close CKT;
+
+print "-I- Outputting $tag\_procedure.tcl.\n";
+open CKT, "> $tag\_procedure.tcl"
+  or die "Error: Cannot open $tag\_procedure.tcl.\n";
+
+$header =~ s/\*/#/g;
+print CKT "$header";
+
+print CKT "proc induc_values_$tag { } {\n\n";
+print CKT "  global induc_skew_$tag , induc_var_$tag;\n\n";
+print CKT "  set induc_var_$tag {\n";
+
+foreach my $elm (keys %typical)
+{
+  print CKT "      $tag\_$elm\n";
+  if (exists $typD{$elm}) {
+    print CKT "      $tag\_$elm\_TC\n";
+  }
+}
+print CKT "      $tag\_skew\n";
+print CKT "  }\n\n";
+
+foreach my $elm(keys %typical)
+{
+  print CKT "  set induc_skew_$tag(typ,$tag\_$elm)\t\"$typical{$elm}\"\n";
+  if (exists $typD{$elm}) {
+    print CKT "  set induc_skew_$tag(typ,$tag\_$elm\_TC)\t\"$typD{$elm}{tc}\"\n";
+  }
+}
+print CKT "  set induc_skew_$tag(typ,$tag\_skew)\t\"0\"\n\n";
+
+foreach my $elm(keys %lowQ)
+{
+  print CKT "  set induc_skew_$tag(low,$tag\_$elm)\t\"$lowQ{$elm}\"\n";
+  if (exists $lowD{$elm}) {
+    print CKT "  set induc_skew_$tag(low,$tag\_$elm\_TC)\t\"$lowD{$elm}{tc}\"\n";
+  }
+}
+print CKT "  set induc_skew_$tag(low,$tag\_skew)\t\"-1\"\n\n";
+
+foreach my $elm(keys %highQ)
+{
+  print CKT "  set induc_skew_$tag(high,$tag\_$elm)\t\"$highQ{$elm}\"\n";
+  if (exists $highD{$elm}) {
+    print CKT "  set induc_skew_$tag(high,$tag\_$elm\_TC)\t\"$highD{$elm}{tc}\"\n";
+  }
+}
+print CKT "  set induc_skew_$tag(high,$tag\_skew)\t\"1\"\n\n";
+
+print CKT "  return 1;\n";
+print CKT "}\n";
+close CKT;

@@ -1,0 +1,5 @@
+#!/usr/bin/csh
+# This scripts cleans up all the stuff left over from running ride using rideIE3DwrapperNB (batch stuff)
+rm *sim.xtr*
+rm "##*"
+

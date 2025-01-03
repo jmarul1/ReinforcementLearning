@@ -1,0 +1,5 @@
+decl fileNames = de_get_file_names("/nfs/pdx/disks/xchip.disk.1/wireless_common/jmarulan/utils/scripts/ael","ael"); decl ii;
+for(ii=0;ii<listlen(fileNames); ii++) {
+  if(fileNames[ii] != "/nfs/pdx/disks/xchip.disk.1/wireless_common/jmarulan/utils/scripts/ael/adsInit")
+  load(sprintf("%s.ael", fileNames[ii]));
+}  

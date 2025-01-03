@@ -1,0 +1,623 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# *****************************************************************************/
+#
+#/******************************************************************************
+# * Filename: ridePostEditGeo
+# * Overview: Many geometry post-processing capabilities for RIDE
+# * Date:     Q1, 2007
+# * Last changed: Q3, 2007 Wed Sep 19 16:47:25 PDT 2007
+# *****************************************************************************/
+
+# Please do not question the quality of this code. It is not supposed to have
+# much. Each time, it seems to make the deadline with high-quality results
+# though. :-) More seriously, it needs to be cleaned-up sometime...
+
+use strict;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+my %optctl;
+&GetOptions(\%optctl, 'help', 'exclude-ct', 'add=f', 'verbose', 'complete-ct',
+                      'add-ct=f', 'add-L=s', 'remove-ct', 'stack=i', 'merge=i',
+                      'include=s', 'multi-stack=i', 'translate=s', 'ctwidth=f');
+
+if ($#ARGV != 0 || $optctl{"help"}) {
+  print <<EOF;
+Usage: modifyTerminals [options] <geo file>
+Options: [-help|-h]               This help
+         [-exclude-ct]            Do not enlarge center-tap
+         [-complete-ct]           Complete center-tap to the "add" value
+         [-remove-ct]             Remove third port if any
+         [-add-ct #]              Provide different center-tap size
+         [-add-L a,b]             Add an 'a'-long L with width 'b'
+         [-add #]                 Add this long feedlines (Default size= 0)
+         [-stack b]               Add stacking layer with metal#b
+         [-merge t]               Merge the bottom (b) to top (t) layers into
+                                  bottom, intended to be used with -stack:
+                                   t_b = (z_t - z_b + t_t)
+                                   sigma_b t_b = sum i=b to i=t sigma_i t_i.
+         [-include file]          Used to add further polygons (file isn't geo!)
+         [-verbose]               Display geo info
+         [-translate string]      Translate coordinates specified by string
+                                  in the format [xy]=#,#;[xy]=#,#... e.g.
+                                  x=8.5,35.5;x=-8.5,-35.5
+         [-ctwidth #]             Specify center-tap width
+EOF
+  exit(0);
+}
+
+my $add = exists $optctl{add} ? $optctl{add} : 0;
+my $modLine = 0;
+my $stack = defined $optctl{stack} ? $optctl{stack} : 0;
+my $removeCT = exists $optctl{"remove-ct"} ? 1 : 0;
+my $merge = defined $optctl{merge} ? $optctl{merge} : $stack;
+my $ctwidth = $optctl{ctwidth};
+my $head = "POSTEDIT>";
+
+if (($merge != 0) and ($merge < $stack)) {
+  die "ERROR: Merged (top) layer < stack (bottom) layer.\n";
+} else {
+  print "$head Merging layers $stack-$merge.\n" if ($optctl{verbose});
+}
+
+if ($removeCT) {
+  warn "WARNING: The -remove-ct option will not work with RIDE.\n";
+  warn "WARNING: Try full-wave mode and FINAL_S3P_SIM = 0 in RIDE input.\n";
+}
+
+my $trans = 0;
+my %trxdat = ();
+my %trydat = ();
+if (defined $optctl{translate}) {
+  $trans = 1;
+  my @cmd = split ';', $optctl{translate};
+  foreach my $c (@cmd) {
+    my $isX = ($c =~ /^x=/) ? 1 : 0;
+    $c =~ s/^[xy]=//;
+    my ($v1, $v2) = split ',', $c;
+    # There should be proper floating point handling here for generality;
+    # but at worst, the user can check the geo and there is not much time
+    # to get this done.
+    if ($isX) {
+      $trxdat{$v1} = $v2;
+      print "$head x = $v1 -> x = $v2\n" if ($optctl{verbose});
+    } else {
+      $trydat{$v1} = $v2;
+      print "$head y = $v1 -> y = $v2\n" if ($optctl{verbose});
+    }
+  }
+}
+
+$ARGV[0] =~ /\.geo/ or die "Error: Input must be a RIDE-output geo file.\n";
+
+open GEO, "<$ARGV[0]" or die "Error: Cannot open the IE3D geometry.\n";
+
+my $addVertices = 0;
+my ($La, $Lb) = (1, 1);
+if (defined $optctl{"add-L"}) {
+  $addVertices = 1;
+  ($La, $Lb) = split ',', $optctl{"add-L"};
+}
+
+my @stackMetals = ();
+my $nmetals = 0;
+
+my @lines;
+my $nterm;
+my $npoly;
+my $nlayer;
+while (<GEO>) {
+  if (/by RIDE /) {
+    chomp;
+    $_ .= " and post-modified by ridePostEditGeo\n";
+  }
+  ++$nmetals if (/00 0 \S+$/);
+  if (/ (\d+) (\d+) (\d+) 0$/) {
+    $npoly = $1;
+    $nlayer = $2;
+    $nterm = $3;
+    if ($removeCT) {
+      --$nterm;
+      s/ (\d+) 0$/ $nterm 0/;
+    }
+    push @lines, $_;
+    $modLine = $#lines;
+    last;
+  }
+  push @lines, $_;
+}
+
+$nmetals = ($nmetals - 1) / 2;
+
+print "$head Number of polygons:  $npoly\n",
+      "$head Number of layers:    $nlayer\n",
+      "$head Number of terminals: $nterm\n",
+      "$head Number of metals including c4: $nmetals\n" if ($optctl{verbose});
+
+for (my $count = 1; $count < $nlayer + $nterm; ++$count) {
+  my $line = <GEO>;
+  if ($line =~ /^(\S+) 0$/) {
+    push @stackMetals, $1;
+  }
+  push @lines, $line;
+}
+
+if ($removeCT) {
+  my $skip = <GEO>;
+}
+
+my ($vertexLine, $nvertex, $polyLayer, $polyMetal) = (0, 0, 0, 0);
+my ($nvertexOld, $vertexLineOld, $polyLayerOld, $polyMetalOld);
+my ($stackP0, $stackP1, $stackVrtx, $stackP0Plus, $stackP1Plus)
+  = (0, 0, 0, 0, 0);
+my ($stackPR0, $stackPR0Plus, $stackPR1, $stackPR1Plus);
+my @preLPoly;
+my $getPreLPoly = 0;
+my $toStackCount = 0;
+my @toStack = ();
+while (<GEO>) {
+  $nvertexOld = $nvertex;
+  $polyMetalOld = $polyMetal;
+  $polyLayerOld = $polyLayer;
+  $vertexLineOld = $vertexLine;
+
+  if (/ (\d+) 0 \d+ (\d+) (\d+)$/) {
+    $nvertex = $1;
+    $polyLayer = $2;
+    $polyMetal = $3;
+    $vertexLine = $#lines + 1;
+  }
+
+  # Implement the stacking of layers
+  if ($stack and $vertexLineOld and ($vertexLine != $vertexLineOld or /^$/)) {
+    my $layerNo = $stack;
+    my $metalNo = ($nmetals - $layerNo) * 2 + 1;
+    my $layerUpNo = $merge + 1;
+    my $metalUpNo = ($nmetals - $layerUpNo) * 2 + 1;
+    if ($polyLayerOld == $layerUpNo and $polyMetalOld == $metalUpNo) {
+      my $cross_under = 0;
+      my ($x_old, $y_old);
+      my $addLine;
+      for (my $c = 1; $c <= $nvertexOld; $c++) {
+        $addLine = $lines[$vertexLineOld + $c];
+        my ($x, $y) = ($addLine =~ /^   (\S+) (\S+) \S+ \S+$/);
+        if ($c > 1 and $x_old != $x and $y_old != $y) {
+          $cross_under = 1;
+          last;
+        }
+        ($x_old, $y_old) = ($x, $y);
+      }
+      if ($cross_under == 0) {
+        if ($getPreLPoly) {
+          $addLine = $preLPoly[0];
+          $nvertexOld = 4;
+        } else {
+          $addLine = $lines[$vertexLineOld];
+        }
+        $addLine =~ s/ (\d+) (\d+)(\s+)$/ $layerNo $metalNo$3/;
+        ++$toStackCount;
+        push @toStack, $addLine;
+        $stackVrtx = $#toStack;
+        for (my $c = 1; $c <= $nvertexOld; $c++) {
+          if ($getPreLPoly) {
+            $addLine = $preLPoly[$c];
+          } else {
+            $addLine = $lines[$vertexLineOld + $c];
+          }
+          my $znew = $stackMetals[$layerNo - 1];
+          my @matches = ($addLine =~ /^   (\S+) (\S+) (\S+) (\S+)$/);
+          push @toStack, "   $matches[0] $matches[1] $znew 0\n";
+          if ($matches[3] == 1 or $matches[3] == 2) {
+            if ($stackP0) {
+              $stackPR1 = $#toStack;
+              $stackPR1Plus = $stackPR1 + 1;
+              $stackP1 = $#toStack + 2;
+              $stackP1Plus = $stackP1 + 1;
+              if ($stackP1Plus > $nvertexOld + $stackVrtx) {
+                $stackP1Plus = $stackVrtx + 1;
+              }
+              if ($stackPR1Plus > $nvertexOld + $stackVrtx) {
+                $stackPR1Plus = $stackVrtx + 1;
+              }
+            } else {
+              $stackPR0 = $#toStack;
+              $stackPR0Plus = $stackPR0 + 1;
+              $stackP0 = $#toStack + 2;
+              $stackP0Plus = $stackP0 + 1;
+              if ($stackP0Plus > $nvertexOld + $stackVrtx) {
+                $stackP0Plus = $stackVrtx + 1;
+              }
+              if ($stackPR0Plus > $nvertexOld + $stackVrtx) {
+                $stackPR0Plus = $stackVrtx + 1;
+              }
+            }
+          }
+        }
+        if ($getPreLPoly) {
+          $getPreLPoly = 0;
+          @preLPoly = ();
+        }
+      }
+    } elsif ($polyLayerOld == 0 and $polyMetalOld == $metalUpNo + 1) {
+      ++$toStackCount;
+      my $addLine = $lines[$vertexLineOld];
+      push @toStack, $addLine;
+      my ($x_old, $y_old);
+      my $reflection = "y";
+      for (my $c = 1; $c <= $nvertexOld; $c++) {
+        $addLine = $lines[$vertexLineOld + $c];
+        my ($x, $y) = ($addLine =~ /^   (\S+) (\S+) \S+ 0$/);
+        if ($c > 1) {
+          if ($x_old == $x) {
+            $reflection = "x";
+            last;
+          } else {
+            last;
+          }
+        }
+        ($x_old, $y_old) = ($x, $y);
+      }
+      for (my $c = 1; $c <= $nvertexOld; $c++) {
+        $addLine = $lines[$vertexLineOld + $c];
+        my ($x, $y, $z ) = ($addLine =~ /^   (\S+) (\S+) (\S+) 0$/);
+        if ($merge != $stack)
+        {
+          if (abs($z - $stackMetals[$merge - 1]) < 1.0E-6) {
+            #print "$head Cross-under z=$z => z=" if ($optctl{verbose});
+            $z = $stackMetals[$stack - 1];
+            #print "$z\n" if ($optctl{verbose});
+          }
+        }
+        if ($reflection eq "x") {
+          $x = -$x;
+        } else {
+          $y = -$y;
+        }
+        push @toStack, "   $x $y $z 0\n";
+      }
+      # Add extra vias to connect distance between merge and stack
+      if ($merge != $stack) {
+        ++$toStackCount;
+        $addLine = $lines[$vertexLineOld];
+        push @toStack, $addLine;
+        for (my $c = 1; $c <= $nvertexOld; $c++) {
+          $addLine = $lines[$vertexLineOld + $c];
+          my ($x, $y, $z ) = ($addLine =~ /^   (\S+) (\S+) (\S+) 0$/);
+          if (abs($z - $stackMetals[$merge - 1]) < 1.0E-6) {
+            #print "$head New via z=$z => z=" if ($optctl{verbose});
+            $z = $stackMetals[$stack - 1];
+            #print "$z\n" if ($optctl{verbose});
+          } elsif (abs($z - $stackMetals[$merge]) < 1.0E-6) {
+            #print "$head New via z=$z => z=" if ($optctl{verbose});
+            $z = $stackMetals[$merge - 1];
+            #print "$z\n" if ($optctl{verbose});
+          }
+          push @toStack, "   $x $y $z 0\n";
+        }
+      }
+    }
+  }
+
+  if (/^$/) {
+    push @lines, $_;
+    last;
+  }
+
+  my $line = $_;
+  if ($nvertex != 4) {
+    &translate(\$line) if ($line =~ /^   /);
+    push @lines, $line;
+  } else {
+    &translate(\$line) if ($line =~ /^   /);
+    my $polyLine = $line;
+    my $polyLineSaved = $polyLine;
+    my @x = ();
+    my @y = ();
+    my @z = ();
+    my @p = ();
+    my $modify = 0;
+    my $ct = 0;
+    for (my $c = 0; $c < 4; $c++) {
+      my $line = <GEO>;
+      ($x[$c], $y[$c], $z[$c], $p[$c]) = split ' ', $line;
+      if ($p[$c] > 0 && (not exists $optctl{"exclude-ct"} or $p[$c] != 3)) {
+        $modify = $c + 1;
+      }
+      $ct = 1 if ($p[$c] == 3);
+    }
+    if ($modify and $addVertices and $ct == 0) {
+      $nvertex += 2;
+      $polyLine =~ s/^ (\d+) / $nvertex /;
+    }
+    push @lines, $polyLine;
+    # Modify begin
+    if ($modify) {
+      $modify -= 1; # Get the true index
+      my $next = $modify + 1;
+      $next = $next > 3 ? 0 : $next;
+      my $prev = $modify - 1;
+      $prev = $prev < 0 ? 3 : $prev;
+      my $next2 = $next + 1;
+      $next2 = $next2 > 3 ? 0 : $next2;
+      my $l = sqrt( ($x[$modify] - $x[$prev])**2.0 +
+                    ($y[$modify] - $y[$prev])**2.0 );
+      # Invoke relations between similar triangles
+      my $ratio = $l / ($l + $add);
+      if ($ct and exists $optctl{"complete-ct"}) {
+        $ratio = $l / $add;
+      }
+      if ($ct and exists $optctl{"add-ct"}) {
+        $ratio = $l / $optctl{"add-ct"};
+      }
+      $x[$modify] = (($ratio - 1.0) * $x[$prev] + $x[$modify]) / $ratio;
+      $x[$next] = (($ratio - 1.0) * $x[$next2] + $x[$next]) / $ratio;
+      $y[$modify] = (($ratio - 1.0) * $y[$prev] + $y[$modify]) / $ratio;
+      $y[$next] = (($ratio - 1.0) * $y[$next2] + $y[$next]) / $ratio;
+      $x[$modify] = sprintf("%.4f", $x[$modify]);
+      $x[$next] = sprintf("%.4f", $x[$next]);
+      $y[$modify] = sprintf("%.4f", $y[$modify]);
+      $y[$next] = sprintf("%.4f", $y[$next]);
+
+      # If in addition, we are supposed to change center-tap width, do that
+      if (defined $ctwidth and $ctwidth > 0 and $ct == 1) {
+        $ratio = ((abs($x[$next] - $x[$modify]) > 1E-3)
+                  ? abs($x[$next] - $x[$modify])
+                  : abs($y[$next] - $y[$modify])) / $ctwidth;
+
+        my ($xn, $xn2) = ($x[$next], $x[$next2]);
+        my ($yn, $yn2) = ($y[$next], $y[$next2]);
+
+        $x[$next] = (($ratio - 1.0) * $x[$modify] + $x[$next]) / $ratio;
+        $x[$next2] = (($ratio - 1.0) * $x[$prev] + $x[$next2]) / $ratio;
+        $y[$next] = (($ratio - 1.0) * $y[$modify] + $y[$next]) / $ratio;
+        $y[$next2] = (($ratio - 1.0) * $y[$prev] + $y[$next2]) / $ratio;
+        $x[$next2] = sprintf("%.4f", $x[$next2]);
+        $x[$next] = sprintf("%.4f", $x[$next]);
+        $y[$next2] = sprintf("%.4f", $y[$next2]);
+        $y[$next] = sprintf("%.4f", $y[$next]);
+
+        $x[$prev] = (($ratio - 1.0) * $xn2 + $x[$prev]) / $ratio;
+        $x[$modify] = (($ratio - 1.0) * $xn + $x[$modify]) / $ratio;
+        $y[$prev] = (($ratio - 1.0) * $yn2 + $y[$prev]) / $ratio;
+        $y[$modify] = (($ratio - 1.0) * $yn + $y[$modify]) / $ratio;
+        $x[$modify] = sprintf("%.4f", $x[$modify]);
+        $x[$prev] = sprintf("%.4f", $x[$prev]);
+        $y[$modify] = sprintf("%.4f", $y[$modify]);
+        $y[$prev] = sprintf("%.4f", $y[$prev]);
+      }
+
+      ++$modify; # Let the rest of the code know we modified since > 0.
+    }
+    # Modify end
+    if ($modify == 0 or $ct == 1 or $addVertices == 0) {
+      for (my $c = 0; $c < 4; $c++) {
+        push @lines, "   $x[$c] $y[$c] $z[$c] $p[$c]\n";
+      }
+    } else {
+      push @preLPoly, $polyLineSaved;
+      for (my $c = 0; $c < 4; $c++) {
+        push @preLPoly, "   $x[$c] $y[$c] $z[$c] $p[$c]\n";
+      }
+      $getPreLPoly = 1;
+      my @extraPoint1;
+      my @extraPoint2;
+      my @movedPoint;
+      $extraPoint2[0] = $x[3];
+      $extraPoint2[1] = $y[1] + ($y[0] > $y[2] ? -1 : 1) * $Lb;
+      $extraPoint1[0] = $x[1] + ($x[2] > $x[0] ? -1 : 1) * $La;
+      $extraPoint1[1] = $y[1];
+      $movedPoint[0] = $extraPoint1[0];
+      $movedPoint[1] = $extraPoint2[1];
+      push @lines, "   $movedPoint[0] $movedPoint[1] $z[0] $p[0]\n";
+      push @lines, "   $extraPoint1[0] $extraPoint1[1] $z[0] 0\n";
+      for (my $c = 1; $c < 4; $c++) {
+        push @lines, "   $x[$c] $y[$c] $z[$c] $p[$c]\n";
+      }
+      push @lines, "   $extraPoint2[0] $extraPoint2[1] $z[3] 0\n";
+    }
+  }
+}
+
+if ($stack) {
+  $toStackCount += 2;
+  my ($cellsPerWavelength) = ($toStack[$stackVrtx] =~ /^ \d+ 0 (\d+) \d+ \d+$/);
+  my $metalNo = ($nmetals - $stack) * 2;
+  my ($x0, $y0, $z0) = ($toStack[$stackP0] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+  my ($x1, $y1, $z1) = ($toStack[$stackP0Plus] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+  push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+  push @toStack, "   $x0 $y0 ", $stackMetals[$merge], " 0\n";
+  push @toStack, "   $x0 $y0 ", $stackMetals[$stack - 1], " 0\n";
+  push @toStack, "   $x1 $y1 ", $stackMetals[$stack - 1], " 0\n";
+  push @toStack, "   $x1 $y1 ", $stackMetals[$merge], " 0\n";
+  ($x0, $y0, $z0) = ($toStack[$stackP1] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+  ($x1, $y1, $z1) = ($toStack[$stackP1Plus] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+  push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+  push @toStack, "   $x0 $y0 ", $stackMetals[$merge], " 0\n";
+  push @toStack, "   $x0 $y0 ", $stackMetals[$stack - 1], " 0\n";
+  push @toStack, "   $x1 $y1 ", $stackMetals[$stack - 1], " 0\n";
+  push @toStack, "   $x1 $y1 ", $stackMetals[$merge], " 0\n";
+  if ($y0 == $y1) {
+    $toStackCount += 4;
+    ($x0, $y0, $z0) = ($toStack[$stackPR0] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+    ($x1, $y1, $z1) = ($toStack[$stackPR0Plus] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+    $y1 = $y0 + abs($x0 - $x1) * ($y0 < 0 ? 1 : -1);
+    push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+    push @toStack, "   $x0 $y0 ", $stackMetals[$merge], " 0\n";
+    push @toStack, "   $x0 $y0 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x0 $y1 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x0 $y1 ", $stackMetals[$merge], " 0\n";
+    push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+    push @toStack, "   $x1 $y0 ", $stackMetals[$merge], " 0\n";
+    push @toStack, "   $x1 $y0 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x1 $y1 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x1 $y1 ", $stackMetals[$merge], " 0\n";
+    ($x0, $y0, $z0) = ($toStack[$stackPR1] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+    ($x1, $y1, $z1) = ($toStack[$stackPR1Plus] =~ /^   (\S+) (\S+) (\S+) \S+$/);
+    $y1 = $y0 + abs($x0 - $x1) * ($y0 < 0 ? 1 : -1);
+    push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+    push @toStack, "   $x0 $y0 ", $stackMetals[$merge], " 0\n";
+    push @toStack, "   $x0 $y0 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x0 $y1 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x0 $y1 ", $stackMetals[$merge], " 0\n";
+    push @toStack, " 4 0 $cellsPerWavelength 0 $metalNo\n";
+    push @toStack, "   $x1 $y0 ", $stackMetals[$merge], " 0\n";
+    push @toStack, "   $x1 $y0 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x1 $y1 ", $stackMetals[$stack - 1], " 0\n";
+    push @toStack, "   $x1 $y1 ", $stackMetals[$merge], " 0\n";
+  }
+}
+
+my $zerozero = -1;
+my $lineno;
+while (<GEO>) {
+  push @lines, $_;
+  $zerozero = $#lines if (/^0 0$/);
+}
+$lineno = $#lines;
+
+close GEO;
+
+if ($optctl{include})
+{
+  open INCLUDE, "< $optctl{include}"
+    or die "ERROR: Cannot open $optctl{include}.\n";
+  my @extras;
+  my %extraZs;
+  my $incr = 0;
+  while (<INCLUDE>) {
+    if (/^ (\d+) (\d+) (\d+) (\d+) (\d+)\s*$/) {
+      ++$incr;
+    } else {
+      if (/^\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/) {
+        $extraZs{$3} = 1;
+      }
+    }
+    push @extras, $_;
+  }
+  close INCLUDE;
+  $npoly += $incr;
+  splice @lines, $zerozero - 1, 0,  @extras;
+  $zerozero += $#extras + 1;
+  $lineno += $#extras + 1;
+  if ($lineno > $zerozero) {
+    my %zs = ();
+    for (my $l = $zerozero + 2; $l <= $lineno; ++$l) {
+      if ($lines[$l] =~ /^\d+ (\S+) 1 0$/) {
+        $zs{$1} = 1;
+      }
+    }
+    for my $key (keys %extraZs) {
+      $zs{$key} = 1 if (not exists $zs{$key});
+    }
+    my @collection = sort keys %zs;
+    $#lines = $zerozero + 1;
+    my $count = 0;
+    $lines[$#lines] = ($#collection + 1) . "\n";
+    for my $z (@collection) {
+      $lines[$#lines + 1] = "$count $z 1 0\n";
+      ++$count;
+    }
+  }
+}
+
+if ($stack and $#toStack) {
+  splice @lines, $zerozero - 1, 0,  @toStack;
+  $npoly += $toStackCount;
+}
+
+# Perform the layer merging now
+if ($merge != $stack) {
+  my ($seenMetal, $sigma_b, $t_b) = (0, 0, 0);
+  $lineno = 0;
+  for (@lines) {
+    my @fields = split /\s/;
+    if ($seenMetal == 0 and $#fields == 8) {
+      $seenMetal = 1;
+    } elsif ($seenMetal == 1 and $#fields != 8) {
+      last;
+    }
+    if (($seenMetal == 1) and /etal(\d+)$/) {
+      my $layer = $1;
+      if (($layer < $stack) or ($layer > $merge)) {
+        ++$lineno;
+        next;
+      }
+      # Save thickness for top under t_b for a while
+      $t_b = $fields[0] if ($layer == $merge);
+      # Compute the sigma x thickness sum in sigma_b
+      $sigma_b += $fields[5] * $fields[0];
+      print "$head Adding up layer #$layer: t = $fields[0], sigma = $fields[5]",
+            "\n$head        z = $stackMetals[$layer - 1] ",
+            "accumulated $sigma_b\n" if (exists $optctl{verbose});
+      if ($layer == $stack) {
+        print "$head Editing metal layer #$stack:\n" if ($optctl{verbose});
+        $t_b = $stackMetals[ $merge - 1 ]
+               - $stackMetals[ $stack - 1 ]
+               + $t_b; # Top thickness from above
+        $sigma_b /= $t_b;
+        $fields[0] = sprintf "%9.5e", $t_b;
+        $fields[5] = sprintf "%9.5e", $sigma_b;
+        $fields[8] .= "\n";
+        $lines[ $lineno ] = join ' ', @fields;
+        print "$head $lines[ $lineno ]" if (exists $optctl{verbose});
+        last;
+      }
+    }
+    ++$lineno;
+  }
+
+  # Now grow merged layer as well
+  $lineno = 0;
+  my $grown;
+  my $skip = 1;
+  for (@lines) {
+    if (!$skip) {
+      if (/^\d+$/) {
+        my $current = $lineno;
+        $grown = ++$lines[ $lineno ];
+        $lines[ $lineno   ] = "$grown\n";
+        for (my $c = 0; $c < $grown; ++$c) {
+          $lines[ ++$lineno ]
+            = "$c " . $stackMetals[$stack - 1 + $c] . " 1 0\n";
+        }
+        last;
+      }
+    } elsif (/^0 0$/) {
+      $skip = 0;
+    }
+    ++$lineno;
+  }
+
+}
+
+# Print all
+$lines[$modLine] =~ s/^ (\d+) / $npoly /;
+open GEO, ">$ARGV[0]" or die "Error: Cannot write the IE3D geometry.\n";
+for (@lines) {
+  print GEO;
+}
+
+exit 0;
+
+sub translate {
+  my ($line) = @_;
+  my ($x, $y, $z, $f) = split ' ', $$line;
+  if (defined $trxdat{$x}) {
+    $x = $trxdat{$x};
+  }
+  if (defined $trydat{$y}) {
+    $y = $trydat{$y};
+  }
+  $$line = "   $x $y $z $f\n";
+}

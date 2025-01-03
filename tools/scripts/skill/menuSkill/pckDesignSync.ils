@@ -1,0 +1,1537 @@
+;;****h* TCC/pckDesignSync
+;;
+;; NAME
+;;
+;; pckDesignSync.ils
+;;
+;; AUTHOR
+;;
+;; Vincent Rayappa
+;;
+;; COPYRIGHT 
+;;
+;; Intel Corporation 2004, 2005, 2006, 2007
+;;
+;; DESCRIPTION 
+;;
+;; DesignSync functions used by the UI.
+;;
+;; USAGE
+;;
+;; (load "pckDesignSync.ils")
+;;
+;;****
+;;
+
+
+;;;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+;;;
+;;; TCC THREE DOT OHH
+;;;
+;;;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+;;;
+;;;
+;;; Functions to perform hierarchy-optimized operations
+;;;
+;;;
+;;;
+
+;;;
+;;; CHECK IN Operations 
+;;;
+(defun pckDSCheckInNew  (menuname lib cell viewname filename category @optional (silent t) (outp nil) (nontcc t))
+  (pckErrsetFormat
+   (let ()    
+   (unless (pckWriteAccessToLibP lib)
+     (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+   (let ((user (getShellEnvVar "USER"))
+         (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+         cell_hier_locks
+		 hier_locked
+         results (message "")
+         (retDpl (ncons nil))
+		 (skip nil)
+		 (force t)
+         )
+
+	 (importSkillVar TCC_DA_NAME)
+     ;;
+     ;; this is a condenced list containing locks other than user
+     ;; TCDA account is included
+     (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+     
+      (if (setof x cell_hier_locks (not (member x (list user TCC_DA_NAME))))
+        ;;
+        ;; Other user (non-tcda or user) locks exist in TCC & non-share cells. Die through pckErr global error
+		  (progn
+			(setq message "")
+;;          (mapcar (lambda (x)
+;;                    (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr x)) (car x)))
+			(setq hier_locked (pckDSHierFindCellsLockedByOthers (car cell_hier)))
+			(foreach l hier_locked
+				   (if (and (pckGetpckGen (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l))) (not (pckGetShare (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l)))))
+					   (progn
+						 (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr l)) (car l))
+						 (pckDebug "pckDSCheckInNew1" message))
+						 ))
+			(if (equal (strcmp message "") 0)
+				;; No TCC & non-share lokced by other go to CI
+			  (progn
+				  (pckDebug "pckDSCheckInNew2" message)
+				  ;; (setq retDpl (pckDSCheckInRaw lib cell ?nontcc nontcc)))
+				  (setq retDpl (pckDSCheckInRaw lib cell skip force silent outp nontcc)))
+			  ;; Has TCC & non-share locked by other die through pckErr
+			  (progn
+				(pckErr 4 message)
+				))
+          )
+		;; No other lock go to CI
+		(progn
+		  (pckDebug "pckDSCheckInNew3" message)
+		  (setq retDpl (pckDSCheckInRaw lib cell skip force silent outp nontcc  )))
+        )
+	  )
+   )
+   ))
+;;
+;; Added nontcc optional para. if nontcc=t not CI non-TCC cells. If nontcc=nil CI non-TCC cells
+;;
+(defun pckDSCheckInRaw (lib cell @optional (skip nil) (force t) (silent t) (outp nil) (nontcc t))
+ ;; (unless (pckWriteAccessToLibP lib)
+;;    (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+  (importSkillVar TCC_PRIM_LIBS)
+  (importSkillVar MESH_LIB)
+  (importSkillVar MESHOLD_LIB)
+  (importSkillVar TCC_DA_NAME)
+  (let ((skipLibs (setof x TCC_PRIM_LIBS (or (nequal x MESH_LIB)
+                                             (nequal x MESHOLD_LIB))))
+		cell_hier_locks
+		hier_locked
+        (fail_count 0)
+        (pass_count 0)
+        (user (getShellEnvVar "USER"))
+        (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+		subcells
+        results (message "")
+		dsResults
+        cat_name
+		(retDpl (ncons nil))
+        )
+  ;;  (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+
+    (cond
+      ((caddr cell_hier)
+       ;; this is pure TCC test row
+       (pckDebug "pckDSCheckInRaw" "Performing quick hierarchy check-in.")
+       (setq results
+              (dssCheckinHierarchyP
+               lib cell "layout"
+               ?switchList (list "layout")
+               ?force force
+               ?skip skip
+               ?new t
+			   ?comment "Checkin via pckDSCheckInNew"
+               ?switchLibChoice "only"
+               ?switchLibNames (list lib MESH_LIB MESHOLD_LIB)         
+               ?processFiles "cell"
+               ?silent nil))
+       (pckDebug "pckDSCheckInRaw" (sprintf nil "Check-in results: %L" results))
+       (pckDSCheckInCat lib cell)
+       (putprop retDpl 1 'success)
+       (putprop retDpl 0 'failure)
+       (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+       (pckDebug "pckDSCheckInRaw" "Check in complete.") 
+	   retDpl
+       )
+      (t
+       ;;
+       ;; Regular check-in
+	   ;; If nontcc==t don't process non-tcc cells so subcells uses tcc_subcells
+	   (pckDebug "pckDSCheckInRaw" "Cells in hierarhcy are missing TCC tag. Switching to mixed-mode CI branch.")
+	   (if nontcc 
+		   (setq subcells (nth 1 cell_hier))
+		 (setq subcells (nth 0 cell_hier)))
+	   (pckDebug "pckDSCheckInRaw" (sprintf nil "Hierarchy-subcells: %L  nontcc %L" subcells nontcc))
+       (setq dsResults (mapcar
+                        (lambda (x)
+                          (dssCheckinCellViewP (nth 0 x) (nth 1 x) (nth 2 x)
+                                               ?new t
+                                               ?comment "Checkin via pckDSCheckInNew"
+                                               ?silent nil
+                                               ?force force
+                                               ?skip skip))
+                        subcells))
+       (pckDebug "pckDesignSync" (sprintf nil "CI results = %L\n" dsResults))
+       ;;get pass/fail counts
+       (setq pass_count (apply 'plus (append (list 0 0)
+                                             (setof x (mapcar 'car dsResults) (fixp x)))))
+       (setq fail_count (apply 'plus (append (list 0 0)
+                                             (setof x (mapcar 'cadr dsResults) (fixp x)))))
+       (putprop retDpl pass_count 'success)
+       (putprop retDpl fail_count 'failure)
+       ;;get revision number of topcell
+       (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+       (pckDSCheckInCat lib cell)
+       retDpl
+       )
+      )
+    )  
+  )
+
+;;;
+;;; CHECK OUT Operations
+;;; pckDSCheckoutLockCellNew mainly checks if row has cell locked by other users and depends on cell status ( TCC gen; non-TCC and shared ) report error or go to CO (call pckDSCheckoutLockCellReal)
+;;;
+(defun pckDSCheckoutLockCellNew (lib cell @optional (silent t) (outp nil) (nolock nil))
+ (pckErrsetFormat
+  (let ()    
+   (unless (pckWriteAccessToLibP lib)
+     (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+   (let ((user (getShellEnvVar "USER"))
+         (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+         cell_hier_locks
+		 hier_locked
+         results (message "")
+         (retDpl (ncons nil))      
+         )
+
+	 (importSkillVar TCC_DA_NAME)
+     ;;
+     ;; this is a condenced list containing locks other than user
+     ;; TCDA account is included
+     (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+     
+	 (if (setof x cell_hier_locks (not (member x (list user TCC_DA_NAME))))
+        ;;
+        ;; Other user (non-tcda or user) locks exist in TCC & non-share cells. Die through pckErr global error
+		  (progn
+			(setq message "")
+;;          (mapcar (lambda (x)
+;;                    (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr x)) (car x)))
+			(setq hier_locked (pckDSHierFindCellsLockedByOthers (car cell_hier)))
+			(foreach l hier_locked
+				   (if (and (pckGetpckGen (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l))) (not (pckGetShare (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l)))))
+					   (progn
+						 (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr l)) (car l))
+						 (pckDebug "pckDSCheckoutLockCellNew1" message))
+						 ))
+			(if (equal (strcmp message "") 0)
+				;; No TCC & non-share lokced by other go to CO
+			  (progn
+				  (pckDebug "pckDSCheckoutLockCellNew2" message)
+				  (setq retDpl (pckDSCheckoutLockCellReal lib cell)))
+			  ;; Has TCC & non-share locked by other die through pckErr
+			  (progn
+				(pckErr 4 message)
+				))
+          )
+		;; No other lock go to CO
+		(progn
+		  (pckDebug "pckDSCheckoutLockCellNew3" message)
+		  (setq retDpl (pckDSCheckoutLockCellReal lib cell)))
+        )
+	  )
+   )       
+  );;pckErrorsetFormat
+ );; Defun
+
+(defun pckImplicitCheckoutLock (lib cell @optional (hier t))
+       (when (and
+              (ddGetObj lib cell "layout")
+              (not (member (getq (pckGetDSVersionRaw lib cell "layout") version) (list "" "0.0")))              
+              (not (pckIsCheckedoutP lib cell "layout")))
+         (pckInfo "pckImplicitCheckoutLock" (sprintf nil "Read-only version of %s %s exists and is checked in." lib cell))
+         (pckInfo "pckImplicitCheckoutLock" "Performing implicit checkout.")         
+         (pckDSCheckoutLockCellRaw lib cell)
+         )
+       )
+;; This is used by TCC testrow generate in Cadence part. No XML output
+(defun pckDSCheckoutLockCellRaw (lib cell @optional (silent t) (outp nil) (nolock nil))
+  (let ()    
+   (unless (pckWriteAccessToLibP lib)
+     (pckError "pckDSCheckoutLockCellRaw" (sprintf nil "No write access to library %s." lib)))
+   (let ((user (getShellEnvVar "USER"))
+         (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+         cell_hier_locks
+		 hier_locked
+         results (message "")
+         (retDpl (ncons nil))      
+         )
+
+	 (importSkillVar TCC_DA_NAME)
+     ;;
+     ;; this is a condenced list containing locks other than user
+     ;; TCDA account is included
+     (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+     
+	 (if (setof x cell_hier_locks (not (member x (list user TCC_DA_NAME))))
+        ;;
+        ;; Other user (non-tcda or user) locks exist in TCC & non-share cells. Die through pckErr global error
+		  (progn
+			(setq message "")
+;;          (mapcar (lambda (x)
+;;                    (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr x)) (car x)))
+			(setq hier_locked (pckDSHierFindCellsLockedByOthers (car cell_hier)))
+			(foreach l hier_locked
+				   (if (and (pckGetpckGen (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l))) (not (pckGetShare (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l)))))
+					   (progn
+						 (sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr l)) (car l))
+						 (pckDebug "pckDSCheckoutLockCellRaw1" message))
+						 ))
+			(if (equal (strcmp message "") 0)
+				;; No TCC & non-share lokced by other go to CO
+			  (progn
+				  (pckDebug "pckDSCheckoutLockCellRaw2" message)
+				  (setq retDpl (pckDSCheckoutLockCellReal lib cell)))
+			  ;; Has TCC & non-share locked by other die through pckErr
+			  (progn
+				(pckError "pckDSCheckoutLockCellRaw"  message)
+				))
+          )
+		;; No other lock go to CO
+		(progn
+		  (pckDebug "pckDSCheckoutLockCellRaw3" message)
+		  (setq retDpl (pckDSCheckoutLockCellReal lib cell)))
+        )
+	  )
+   )       
+ );; Defun
+
+
+;; This function purly doing hier CO or cell base CO. No other user lock check.
+(defun pckDSCheckoutLockCellReal (lib cell @optional (silent t) (outp nil) (nolock nil))
+  (let ()    
+;;   (unless (pckWriteAccessToLibP lib)
+;;     (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+   ;;
+   ;; this functions calls pckGetHierpck which in turn calls dssListHierarchyP
+   ;; and then checks lockers of cells one by one
+   ;; cell_hier contains full hierarchy, TCC hierarchy and match indicator (bool)
+   ;; 
+   (let ((user (getShellEnvVar "USER"))
+		 (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+         cell_hier_locks
+		 hier_locked
+         results (message "")
+         dsResults
+         (retDpl (ncons nil))
+         (fail_count 0)
+         (pass_count 0)
+         cat_name
+         
+         )
+     (importSkillVar TCC_DA_NAME)
+     ;;
+     ;; this is a condenced list containing locks other than user
+     ;; TCDA account is included
+     (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+     
+     (cond
+	  ((caddr cell_hier)
+       ;;
+       ;; This is for pure TCC & can be DA lock or user lock or no lock.
+	   ;; If DA lock do DA cancel before hier CO. 
+	   ;; we can use quick hierarchy checkout.
+        (when (member TCC_DA_NAME cell_hier_locks)
+          (pckDebug "pckDSCheckoutLockCellNew" "There are admin locks on cell hierarchy.")
+		  (pckInfo "pckDesignSync" "Submitting job to unlock cell from DA.")
+		  (pckCancelDaLock lib cell)
+		  (ipcSleep 30))
+        (pckDebug "pckDSCheckoutLockCellNew" "Performing pure TCC quick hierarchy checkout.")
+        (setq results
+              (dssCheckoutHierarchyP
+               lib cell "layout"
+               ?switchList (list "layout")
+               ?mode "lock"
+               ?switchLibChoice "only"
+               ?switchLibNames (list lib)         
+               ?processFiles "cell" ?silent nil))
+        (pckDebug "pckDSCheckoutLockCellNew" (sprintf nil "Checkout results: %L" results))
+        (when (nequal (cadr results) 0)
+          ;;
+          ;; quick check whether some hierarchy member was not checked out for some reason
+          ;; perhaps this is redundant
+          (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+          (when cell_hier_locks
+            (setq message "")
+            (mapcar (lambda (x)
+                      (sprintf message "%sCell %s locked by %s\n" message (nth 1 (cadr x)) (car x)))
+                    (pckDSHierFindCellsLockedByOthers (car cell_hier)))
+            (pckErr 4 message)
+            )
+          )
+        ;;
+        ;; Last but not least - Category
+        (pckDSCheckoutLockCat lib cell)
+        ;;
+        ;;        
+        (putprop retDpl 1 'success)
+        (putprop retDpl 0 'failure)
+        (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+        (pckDebug "pckDSCheckoutLockCellNew" "Check out complete.")
+        retDpl
+        )
+       (t
+        ;;
+        ;; Either we're dealing mixed mode case & full custom (hierarchy is different from
+        ;; TCC hierarchy - not all cells have createdBypck property).
+        ;; OR
+        ;; some hierarchy members are locked by tcda
+        ;; and we need to run tcda unlock process prior to unlocking hierarhy
+        ;; members one by one.
+        ;; This is defaut operation in TCC 2.0
+        (unless (nth 2 cell_hier)
+          (pckDebug "pckDSCheckoutLockCellNew" "Cells in hierarhcy are missing TCC tag. Switching to mixed-mode CO branch.")
+          ;;
+          ;; print out cells not in TCC hierarchy
+          )
+		;; Do DA cancel before go to cell base check out. Removed DA cancel in cell base CO pckDSCheckoutLockCellSingle
+        (when (member TCC_DA_NAME cell_hier_locks)
+          (pckDebug "pckDSCheckoutLockCellNew" "There are admin locks on cell hierarchy.")
+		  (pckInfo "pckDesignSync" "Submitting job to unlock cell from DA.")
+		  (pckCancelDaLock lib cell)
+		  (ipcSleep 30))
+        
+        (pckDebug "pckDSCheckoutLockCellNew" "Performing traditional checkout.")
+        (pckDebug "pckDSCheckoutLockCellNew" (sprintf nil "cell hierarchy to checkout - %L" (nth 1 cell_hier)))
+        (setq dsResults (mapcar
+                         (lambda (x)
+                           (pckDSCheckoutLockCellSingle
+                            (nth 0 x) (nth 1 x)
+                            silent
+                            outp
+                            nolock))                      
+                         (nth 1 cell_hier)))
+        (pckDebug "pckDesignSync" (sprintf nil "CO results = %L\n" dsResults))
+        (setq pass_count (apply 'plus (append (list 0 0)
+                                              (setof x (mapcar 'car dsResults) (fixp x)))))
+        (setq fail_count (apply 'plus (append (list 0 0)
+                                              (setof x (mapcar 'cadr dsResults) (fixp x)))))
+        (putprop retDpl pass_count 'success)
+        (putprop retDpl fail_count 'failure)
+        (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+        ;;
+        ;; Last but not least - Category
+        ;;
+        (pckDSCheckoutLockCat lib cell)
+        
+        ;;
+        ;; return for TCC UI to use
+        (pckDebug "pckDSCheckoutLockCellNew" "Check out complete.")
+        retDpl
+        )       
+       )
+     )
+   )
+  )
+
+;;****f* pckDesignSync/pckDSCheckoutLockCellSingle
+;;
+;; FUNCTION
+;;
+;; Checkout the given lib/cell in lock mode
+;; Returns success and failure counts in standard XML response format
+;; Non-zero faulire count is trapped and error #109 is thrown. So you will
+;; never see a success XML with non-zero failure.
+;; 
+;; USAGE
+;;
+;; (pckDSCheckoutLockCellSingle lib cell @optional (silent t) (outp nil) (nolock nil))
+;;
+;; Setting silent to t suppresses all descriptive error messages to the 
+;; CIW window. To avoid this set it to nil.
+;;
+;; The outp paramters is essentially a no-op. Ignore it.
+;;
+;; The nolock parameter prevents checkout for edit for the user. You use this
+;; if you just want to unlock the DA's lock but not co for edit for the user.
+;; Default value for nolock is nil, meaning cell is co for edit for the user.
+;;**** 
+
+(defun pckDSCheckoutLockCellSingle (lib cell @optional (silent t) (outp nil) (nolock nil))
+  (let ((ret (pckDSCheckoutLockCellInternal lib cell silent outp nolock))
+        (retDpl (ncons nil)))     
+    (if (equal (cadr ret) 0)            ;check for non-zero fail count
+        (progn                    
+          ret)
+        (progn           
+          (pckErr 109)))))
+
+;; No other user lock check. It's already checked in pckDSCheckoutLockCellNew
+(defun pckDSCheckoutLockCellInternal (lib cell @optional (silent nil) (outp nil) (nolock nil))
+  (let (locker layAlreadyCO ret (retDpl (ncons nil)))
+    (pckDebug "pckDSCheckoutLockCellInternal" (sprintf nil "Working on %s %s" lib cell))
+	(setq locker
+          (if (equal (getShellEnvVar "PROJECT") "tccdev")
+              (dssIsViewLockedP lib cell "layout" ?vault t) 
+			;; Changed Check vault lock for prod area too.
+			;;(dssIsViewLockedP lib cell "layout")))
+              (dssIsViewLockedP lib cell "layout" ?vault t)))
+    (if (equal locker (getShellEnvVar "USER"))
+        (progn
+          (pckInfo "pckDesignSync" (sprintf nil "layAlreadyCO = %L" t))
+          (setq ret (list 0 0))
+          )
+        (progn
+          
+          ;;Check if cell still lock by DA. It can be A step cell or DA unlock not successful.
+          (importSkillVar TCC_DA_NAME)
+		  (when (equal locker TCC_DA_NAME)
+			(pckInfo "pckDesignSync" (sprintf nil "Cell %s %s is locked by DA." lib cell) )
+			(setq layAlreadyCO t))
+;;			(pckErr 109
+;;                          (sprintf nil "%s %s locked by %s." lib cell
+;;                                   (caar
+;;                                    (pckDSHierFindCellsLockedByOthers
+;;                                     (list (list lib cell "layout")))))))
+          ;;check if views are already locked
+;;          (foreach s (gdmstatus (gdmCreateSpec lib cell nil nil "LibraryUnix") 7)         
+;;                   (when (or  (and (nindex (car s) "layout.sync.cds")
+;;                                   (nindex (car s) "gdmStateWrite"))
+;;                              (and (nindex (car s) "layout.oa")
+;;                                   (nindex (car s) "gdmStateWrite"))
+;;                              )
+;;                     (setq layAlreadyCO t)))
+          (pckInfo "pckDesignSync" (sprintf nil "layAlreadyCO = %L" layAlreadyCO))
+          (pckInfo "pckDesignSync" (sprintf nil "nolock = %L" nolock))
+          ;;
+          ;; what happens if both layAlreadyCO & nolock are nil?
+          ;; no trapping of CO failures
+          (setq ret 
+                (cond (layAlreadyCO 
+                       (list 0 0))
+                      (nolock
+                       (list 0 0))
+;;Don't CO any cell that pointing to "latest" work area
+					  ((rexMatchp "/latest/" (dssGetViewPathP lib cell "layout"))
+					   (pckInfo "pckDesignSync" (sprintf nil "cell is in latest db area. No CO allowed"))
+					   (list 0 0))								 
+                      (t
+                       (dssCheckoutCellViewP lib cell "layout"
+                                             ?mode "lock" ?force t ?silent nil ))))
+          (if (and (not nolock) (equal (cadr ret) 1))
+              ;;
+              ;; we needed to lock the cell and could not
+              (pckErr 109
+                      (sprintf nil "Failure to lock %s %s. Check DS server.." lib cell))
+              )
+          )        
+        )    
+    ret))
+;;****f* pckDesignSync/pckDSCancelCheckoutCell
+;;
+;; FUNCTION
+;; 
+;; Cancel checkout of a cell. Return value in standard return format.
+;; Response contains success and failure count for each view/file
+;; under cell.  A non-zero fail count is considered an error and an
+;; error is thrown.  Only the exact error message in the UI will help
+;; in figuring out the nature of failure.
+;; 
+;; Also the success/failure counts might not be present if no cancel was done
+;; (because no cells/files were checked-out in the workspace).
+;;
+;; USAGE
+;;
+;; (pckDSCancelCheckoutCell lib cell @optional (silent t) (outp nil))
+;;
+;; Setting silent to t suppresses all descriptive error messages to the 
+;; CIW window. To avoid this set it to nil.
+;; The last optional parameter (outp) is ignored and has no effect. It is
+;; there to make the function signature amenable to batch-mode calls.
+;;****
+
+(defun pckDSCancelCheckoutCellSingle (lib cell @optional (force nil) (silent t) (outp nil))
+  (let ((ret (ncons nil))
+        (entities (pckDSEnumEntities lib cell))
+        ftail retds 
+		(user (getShellEnvVar "USER")))
+    (foreach v (get entities 'views)
+             (when (equal user (dssIsViewLockedP lib cell v))
+               (when (and (not force) (pckIsModifiedP lib cell v))
+                 (pckErr 110)) ;raise error when cancelling modified obj without force
+               (setq retds (dssCancelCellViewP lib cell v ?force force ?silent silent))
+               (putprop ret (car retds) (concat 'success "_" v))
+               (if (greaterp (cadr retds) 0)
+                   (pckErr 110)     ;always throw error for >0 failure
+                   (putprop ret (cadr retds) (concat 'failure "_" v)))))
+    (foreach f (get entities 'files)
+             (when f               
+               (when (dssIsFileLockedP f)
+                 (when (and (not force) (pckIsModifiedP lib cell "" f))
+                   (pckErr 110)) ;raise error when cancelling modified obj without force
+                 (setq retds (dssCancelFileP f ?force force ?silent silent))
+                 (setq ftail (car (last (parseString f "/"))))
+                 (putprop ret (car retds) (concat 'success "_" ftail))
+                 (if (greaterp (cadr retds) 0)
+                     (pckErr 110)   ;always throw error for >0 failure
+                     (putprop ret (cadr retds) (concat 'failure "_" ftail))))))
+    ;; If there were no real checkouts here, ret could well be
+    ;; (nil). To satisfy pckErrsetFormat protocol set return value to t
+    ;; (indicating success), since this is a case were we did no
+    ;; work.
+    (if (equal (length ret) 1)
+        t
+        retds)))
+
+(defun pckDSCancelCheckoutCellNew (lib cell @optional (force nil) (silent t) (outp nil))
+  (pckErrsetFormat
+   (importSkillVar TCC_PRIM_LIBS)
+   (let ((skipLibs TCC_PRIM_LIBS)
+		 (user (getShellEnvVar "USER"))
+         (cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+         cell_hier_locks
+		 hier_locked
+		 (retDpl (ncons nil))
+		 (message ""))  
+	 (unless (pckWriteAccessToLibP lib)
+     (pckErr 3 (sprintf nil "No write access to library %s." lib)))        
+     (importSkillVar TCC_DA_NAME)
+	 ;;
+     ;; this is a condenced list containing locks other than user
+     ;; TCDA account is included
+     (setq cell_hier_locks (pckDSHierLockQuickP cell_hier))
+
+       (if (setof x cell_hier_locks (not (member x (list user TCC_DA_NAME))))
+        ;;
+        ;; non-tcda locks exist in TCC & non-share cells. Die through pckErr global error
+		 (progn
+			 (setq message "")
+			 (setq hier_locked (pckDSHierFindCellsLockedByOthers (car cell_hier)))
+			 (foreach l hier_locked
+				  (if (and (pckGetpckGen (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l))) (not (pckGetShare (nth 0 (cadr l)) (nth 1 (cadr l)) (nth 2 (cadr l)))))
+					  (progn						
+						(sprintf message "%s Cell %s locked by %s\n" message (nth 1 (cadr l)) (car l))
+						(pckDebug "pckDSCancelCheckoutLockCellNew1" message))
+					))
+			 (if (equal (strcmp message "") 0)
+				 ;; No TCC & non-share lokced by other go to Cancel
+			   (progn
+				(pckDebug "pckDSCancelCheckoutLockCellNew2" message)
+				(setq retDpl (pckDSCancelCheckoutCell lib cell force)))   
+			   (progn
+				 (pckDebug "pckDSCancelCheckoutLockCellNew3" message)
+				 (pckErr 4 message)))
+			 ) 
+		 ;; No other lock go to Cancel      
+		 (progn
+		;; Only cancel TCC cell
+		   (pckDebug "pckDSCancelCheckoutLockCellNew4" message)
+		   (setq retDpl (pckDSCancelCheckoutCell lib cell force))
+		  )))
+   ))
+
+(defun pckDSCancelCheckoutCell (lib cell @optional (force nil) (silent t) (outp nil))
+  (let ((cell_hier (pckDSGetAndCheckHierpck lib cell "layout"))
+		(fail_count 0)
+        (pass_count 0)      
+        (retDpl (ncons nil))
+        dsResults)
+
+	(setq dsResults (mapcar
+					 (lambda (x)
+					   (pckDSCancelCheckoutCellSingle (nth 0 x) (nth 1 x)
+													  force
+													  silent
+													  outp))
+					 (nth 1 cell_hier)))
+	(pckDebug "pckDesignSync" (sprintf nil "Cancel results = %L\n" dsResults))
+		;; with OA we get might get return values of t in dsResults. Throw these
+		;; out.
+	(setq dsResults (setof x dsResults (listp x)))
+		;;get pass/fail counts
+	(setq pass_count (apply 'plus (append (list 0 0)
+										  (setof x (mapcar 'car dsResults) (fixp x)))))
+	(setq fail_count (apply 'plus (append (list 0 0)
+										  (setof x (mapcar 'cadr dsResults) (fixp x)))))
+	(putprop retDpl pass_count 'success)
+	(putprop retDpl fail_count 'failure)
+	retDpl))
+;;
+;; Similar to pckGetHierpck
+;; but returns both full hierarchy, TCC hierarchy, indication whether hierarchies
+;; match (and locks?)
+(defun pckDSGetAndCheckHierpck (lib cell view @optional (skipLibs nil))
+  (let (subcells tcc_subcells match)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq subcells 
+          (if skipLibs 
+              (dssListHierarchyP lib cell view
+                                 ?switchList (list view)
+                                 ?switchLibChoice 'not
+                                 ?switchLibNames skipLibs)
+              (dssListHierarchyP lib cell view
+                                 ?switchList (list view))))
+	;; TCC cells is TCC gen & non-share 
+    (setq tcc_subcells (setof x subcells (and (pckGetpckGen (nth 0 x) (nth 1 x) (nth 2 x)) (not (pckGetShare (nth 0 x) (nth 1 x) (nth 2 x))))))
+    ;;make sure that tcc_subcells always contains top-level-->Don't know why so comment out below 2 lines
+ ;;   (unless (member (list lib cell view) tcc_subcells)      
+ ;;     (setq tcc_subcells (cons (list lib cell view) tcc_subcells)))
+    ;; I can use 'equal' here because tcc_subcells are created from subcells
+    ;;
+    (setq match (equal subcells tcc_subcells))
+    (pckDebug "pckDSGetAndCheckHierpck" (sprintf nil "Hierarchy: %L Match to TCC hierarchy: %L" subcells match))
+    (list subcells tcc_subcells match))
+  )
+
+;;
+;; Quick check of locks in hierarchy excluding user
+;; Based on pckHierLockP
+;; Uses provided hierarhy lists
+(defun pckDSHierLockQuickP (cell_hier @optional (skipLibs nil))
+  (let ((user (getShellEnvVar "USER"))
+        cell_hier_locks 
+        lockers hier_locked thislocked)
+    (importSkillVar TCC_DA_NAME)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq cell_hier_locks
+           (mapcar
+            (lambda (x)
+              (if (equal (getShellEnvVar "PROJECT") "tccdev")
+                  (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault t)
+                  (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault nil)))
+            (car cell_hier)))
+    (pckDebug "pckDSHierLockQuickP" (sprintf nil "Hierarchy locks - %L" cell_hier_locks))
+    ;;
+    ;; find lockers others than 'nil' or user
+    (setq cell_hier_locks (setof x cell_hier_locks (not (member x (list user nil)))))
+    (pckDebug "pckDSHierLockQuickP" (sprintf nil "Reduced hierarchy locks - %L" cell_hier_locks))
+    cell_hier_locks))
+;;
+;; Quick check of all locks in hierarchy including user
+;; Based on pckHierLockP
+;; Uses provided hierarhy lists
+(defun pckDSHierLockQuickAllP (cell_hier @optional (skipLibs nil))
+  (let ((user (getShellEnvVar "USER"))
+        cell_hier_locks 
+        lockers hier_locked thislocked)
+    (importSkillVar TCC_DA_NAME)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq cell_hier_locks
+           (mapcar
+            (lambda (x)
+              (if (equal (getShellEnvVar "PROJECT") "tccdev")
+                  (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault t)
+                  (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault nil)))
+            (car cell_hier)))
+    (pckDebug "pckDSHierLockQuickP" (sprintf nil "Hierarchy locks - %L" cell_hier_locks))
+    ;;
+    ;; find all lockers others
+    (setq cell_hier_locks (setof x cell_hier_locks (not nil)))
+    (pckDebug "pckDSHierLockQuickP" (sprintf nil "Reduced hierarchy locks - %L" cell_hier_locks))
+    cell_hier_locks))
+;;
+;; Check whether tcda checks exists
+;; 
+
+;;
+;; Find all locked cells by others/DA in hierarchy
+;;
+(defun pckDSHierFindCellsLockedByOthers (cell_hier  @optional (skipLibs nil))
+  "Find all cells locked by someoen other than user. Condence list of lock onwers to unique names only."
+  (let ((user (getShellEnvVar "USER")) lockers (hier_locked (list))  thislocked)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq lockers (mapcar
+                   (lambda (x)
+                     (if (equal (getShellEnvVar "PROJECT") "tccdev")
+                         (list (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault t)
+                               x)
+                         (list (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault nil)
+                               x)))
+                     cell_hier))
+    (foreach l lockers
+             (setq thislocked (and (not (null (car l))) (not (member (car l) (list user nil)))))
+             (when thislocked
+               (setq hier_locked (cons l hier_locked))
+               (pckWarn "pckDesignSync" (sprintf nil "%L locked by %s." (cadr l) (car l)))
+               )
+             )
+    hier_locked
+    )
+  )
+
+;;****f* pckDesignSync/pckGetDSVersion
+;;
+;; FUNCTION
+;;
+;; Assumption: We are in a UE-like DS setup
+;; Given lib cell and view returns version the standard TCC2 response XML format. 
+;;
+;; USAGE
+;;
+;; (pckGetDSVersion lib cell view)
+;;
+;;****
+
+(defun pckGetDSVersion (lib_full cell view)
+  (pckErrsetFormat 
+   (pckGetDSVersionRaw lib_full cell view)))
+
+(defun pckGetDSVersionRaw (lib_full cell view)
+  (let (syncURL fileURL suffix 
+                (view_dir (nth 2 (parseString lib_full "_")))
+                (retDPL (ncons nil))
+                (ret (makeVector 4)) 
+                (lib (nth 0 (parseString lib_full "_")))
+                (project (nth 1 (parseString lib_full "_")))
+                tclret errMsg)
+    (unless (equal view "layout")
+      (setq errMsg "Input param view not layout."))
+    (when (equal (length (parseString lib_full "_")) 2)
+      (setq errMsg "Personal library not udner version control.")
+      )
+    (if errMsg
+        (progn
+          (ret[0] = "0.0")
+          (ret[1] = "0.0")
+          (ret[2] = errMsg)
+          (ret[3] = errMsg))
+        (progn        
+          (if (getShellEnvVar "SAFRAN_DIR")
+              (progn ;VLW DB
+                (setq suffix (strcat lib_full "/" cell "/" view ".sync.cds"))
+                (setq syncURL (strcat (pckGetDsProjUrl project) "/db/" (substring lib_full 1 1) "/" suffix ";")))
+              (progn
+                (setq suffix (strcat "/" lib "_" project "/" view_dir "/"
+                                     lib "_" project "_" view_dir "/" cell "/"
+                                     view ".sync.cds"))
+                (setq syncURL (strcat (pckGetDsProjUrl project) suffix ";"))))
+
+          (setq fileURL (strcat "file://" (getShellEnvVar "DB_ROOT") "/" project "/" suffix))   
+          (setq tclret (car (dssExecuteTclP "url resolvetag -version LATEST \"%s\"" syncURL)))
+          (if (nindex tclret "SomAPI-E") 
+              (progn
+                (ret[0] = "0.0")
+                (ret[2] = tclret))
+              (progn
+                (ret[0] = (substring tclret 1 (difference (strlen tclret) 1)))
+                (ret[2] = "")))
+          (setq tclret (car (dssExecuteTclP "url resolvetag -version LATEST \"%s\"" fileURL)))
+          (if (nindex tclret "SomAPI-E") 
+              (progn
+                (ret[1] = "0.0")
+                (ret[3] = tclret))
+              (progn
+                (ret[1] = (substring tclret 1 (difference (strlen tclret) 1)))
+                (ret[3] = "")))))
+    ;;(sprintf nil "%L" (list (atof ret[0])))
+    ;;(strcat "(" ret[0] ")")
+    (putprop retDPL ret[0] 'version)
+    retDPL))  
+
+
+
+
+
+(defun pckDSCheckoutLockCell (lib cell @optional (silent t) (outp nil) (nolock nil))
+  (pckErrsetFormat   
+   (unless (pckWriteAccessToLibP lib)
+     (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+   (when (pckHierLockP lib cell "layout")
+     (pckErr 4))
+   (importSkillVar TCC_PRIM_LIBS)
+   (let ((skipLibs TCC_PRIM_LIBS)
+         (fail_count 0)
+         (pass_count 0)
+         subcells
+         (viewname "layout")
+         (retDpl (ncons nil))
+         dsResults)          
+     ;;get all subcells
+     (setq subcells (pckGetHierpck lib cell viewname skipLibs))
+     ;;process subcells all subcells
+     (setq dsResults (mapcar
+                      (lambda (x)
+                        (pckDSCheckoutLockCellSingle (nth 0 x) (nth 1 x)
+                                                        silent
+                                                        outp
+                                                        nolock))                      
+                      subcells))
+     (pckDebug "pckDesignSync" (sprintf nil "CO results = %L\n" dsResults))
+     ;;get pass/fail counts
+     (setq pass_count (apply 'plus (append (list 0 0)
+                                           (setof x (mapcar 'car dsResults) (fixp x)))))
+     (setq fail_count (apply 'plus (append (list 0 0)
+                                           (setof x (mapcar 'cadr dsResults) (fixp x)))))
+     (putprop retDpl pass_count 'success)
+     (putprop retDpl fail_count 'failure)
+     ;;get revision number of topcell
+     (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+     retDpl)))
+
+;; Submit a request to GP Server to cancel a cell hier
+;; that have been locked by the DA.
+(defun pckCancelDaLock (lib cell)
+  (let (filename cmd cid)
+    (importSkillVar TCC_TIR_JOBDIR)
+    (setq filename (sprintf nil "%s/%s_%s_TIR1.cvhier"
+                            TCC_TIR_JOBDIR
+                            lib
+                            cell))
+    (pckInfo "pckDesignSync" (sprintf nil "Cancel DA's lock. Filename = %s" filename))
+    ;;
+    ;; Need error trapping messages here
+    ;;
+    ;; Update 11/19/2008 -- Vincent Rayappa
+    ;; Removing this since when we attempt to checkout a sub-cell there
+    ;; will not be a TIR1.cvhier file corresponding to the sub-cell.
+    ;;
+;;     (unless (isFile filename)
+;;       (pckErr 113 (sprintf nil "Filename %s" filename)))
+    
+    (importSkillVar TCC_UTILS)
+    (importSkillVar TCC_GP_HOST)
+    (importSkillVar TCC_GP_PORT)
+    (setq cmd (sprintf nil "%s/core/tcl/pckSocketClient.tcl %s %d %s"
+                       TCC_UTILS
+                       TCC_GP_HOST
+                       TCC_GP_PORT
+                       (sprintf nil "canceluntag:%s" filename)))
+    (setq cid (ipcBeginProcess cmd))
+    (ipcWaitForProcess cid)
+    (pckInfo "pckDesignSync"
+             (sprintf nil "Response for pckCanceDaLock operation: %L"
+                      (ipcReadProcess cid)))
+    (ipcWait cid)))
+
+;; Submit a request to GP Server to cancel one cell
+(defun pckCancelDaLockShare (lib cell)
+  (let (filename cmd cid pathWork jobfile tag)
+    (importSkillVar TCC_TIR_JOBDIR)
+    
+	;;Get all tags of the cell
+	(setq pathWork (dssGetViewPathP lib cell "layout"))
+	(setq tag (car dssExecuteTclP( "url tag \"%s\"" pathWork)))
+	;; If share cell & no TI tag "TC_TAPED_IN" call unlock deamon	
+	(if (and (pckGetShare lib cell "layout") (not (nindex tag "TC_TAPED_IN")))
+		(progn
+		  (pckInfo "pckDesignSync" (sprintf nil "Cancel DA's lock for shared cell."))
+		  ;;create the job file
+		  (pckDebug "pckDesignSync" "Unlock Shared cell: Creating job file")
+		  (setq filename (sprintf nil "%s/%s_%s_SHARE.cvhier"
+                            TCC_TIR_JOBDIR
+                            lib
+                            cell))
+		  (printf "Jobfile = %s\n" filename)
+		  (setq jobfile (outfile filename))
+		  (fprintf jobfile "%s %s layout %L\n" lib cell (pckGetShare lib cell "layout"))
+		  (close jobfile)
+		  ;; Send DA unlock share deamon 
+		  (importSkillVar TCC_UTILS)
+		  (importSkillVar TCC_GP_HOST)
+		  (importSkillVar TCC_GP_PORT)
+		  (setq cmd (sprintf nil "%s/core/tcl/pckSocketClient.tcl %s %d %s"
+                       TCC_UTILS
+                       TCC_GP_HOST
+                       TCC_GP_PORT
+                       (sprintf nil "cancelshare:%s" filename)))
+		  (setq cid (ipcBeginProcess cmd))
+		  (ipcWaitForProcess cid)
+		  (pckInfo "pckDesignSync"
+				   (sprintf nil "Response for pckCanceDaLock operation: %L"
+							(ipcReadProcess cid)))
+		  (ipcWait cid))
+	    (progn
+		  (pckError "pckDesignSync" (sprintf nil "Cell %s/%s can't be unlocked because it is not a shared cell or it has been taped-in" lib cell)))
+)))
+
+;;****f* pckDesignSync/pckDSCheckoutReadCell
+;;
+;; FUNCTION
+;;
+;; Checkout the given lib/cell in cache (read-only) mode.  The return
+;; value from DS is essentially ignored. The return value from this
+;; function is in the standard response format.
+;;
+;; USAGE
+;;
+;; (pckDSCheckoutReadCell lib cell view @optional (silent t))
+;;
+;; Setting silent to t suppresses all descriptive error messages to the 
+;; CIW window. To avoid this set it to nil.
+;;****
+
+(defun pckDSCheckoutReadCell (lib cell view @optional (silent t))
+  (pckErrsetFormat
+   (dssCheckoutHierarchyP lib cell view 
+              ?switchList (list "layout" "symbol")
+              ?fetchMissingCells t
+              ?mode "share" 
+              ?silent silent)
+   t))
+
+
+
+
+
+
+;; Enumerate entities under a cell that can be checked in/out as
+;; a file in DesignSync. Essentially this is view names and
+;; prop.xx file path (if any).
+;; The function returns a DPL with two keys: views and files
+;; The views key wil contain a list of views and the files key
+;; will contain a list of files
+
+(defun pckDSEnumEntities (lib cell)
+  (let ((dpl (ncons nil))
+        (obj (ddGetObj lib cell)))
+    (putprop dpl obj~>views~>name 'views)   
+    (putprop dpl obj~>prop~>object~>readPath 'files)
+    dpl))
+              
+
+;;****f* pckDesignSync/pckDSCancelCheckoutCellView
+;;
+;; FUNCTION
+;; 
+;; Cancel checkout of a cell. Return value in standard return format.
+;; Response contains success and failure count. A non-zero fail count
+;; is not necessarily something to worry about. It might be bad, but
+;; not necessarily so. Only the exact error message in the UI will
+;; help in figuring out the nature of failure.
+;; 
+;; USAGE
+;;
+;; (pckDSCancelCheckoutCellView lib cell view @optional (silent t))
+;;
+;; Setting silent to t suppresses all descriptive error messages to the 
+;; CIW window. To avoid this set it to nil.
+;;****
+(defun pckDSCancelCheckoutCellView (lib cell view @optional (silent t))
+  (pckErrsetFormat
+   (let ((ret (ncons nil))
+         (retds (dssCancelCellViewP lib cell view ?silent silent)))
+     (putprop ret (car retds) 'success)
+     (putprop ret (cadr retds) 'failure)
+     ret)))
+
+
+
+;;****f* pckDesignSync/pckLmgrCheckInCBSingle
+;;
+;; FUNCTION
+;; 
+;; This function wraps around dssCheckinCellViewP, dssCheckinCellP and
+;; dssCheckinLibraryP
+;; 
+;; Checkin the given lib/cell/cell in lock mode. Use empty string for
+;; viewname if all views are being checked in. Use empty strings for
+;; filename and category if those params are not applicable.  Returns
+;; response in standard XML format. It will contain success and
+;; failure count.  The only concern should be non-zero failures. If
+;; there is some unhandled exception the return value will always be
+;; (0 1).  The last optional parameter can be set to nil to get error
+;; messages instead of just the error code. If the last parameter is
+;; set to nil and there are errors, the error messages will be
+;; followed by the return code i.e. the return is always the last item
+;; that is returned.
+;; 
+;; This function no longer generates/FTP's netlist to the UI server.
+;; That is handled by DesignSync client trigger (tcc_ci_netlist). 
+;;
+;; This function is meant for use by the TCC UI via IPC.
+;;
+;; USAGE
+;;
+;; (pckLmgrCheckInCBSingle menuname lib cell viewname filename 
+;;                   category @optional (skip nil) (silent t))
+;;****
+
+(defun pckLmgrCheckInCBSingle (menuname lib cell viewname filename category 
+                         @optional (skip nil) (silent t) (outp nil) (force t)) 
+  (pckErrsetFormat
+   (let ((dsRet (list 0 0)) (retDpl (ncons nil)))
+     ;; Figure out which DS function to call
+     (unless silent (printf "Start DS checkin.\n"))
+     (cond ((unless (pckWriteAccessToLibP lib)
+              (pckErr 3 (sprintf nil "No write access to library %s." lib))))           
+           ((greaterp (strlen viewname) 0)
+            (setq dsRet (dssCheckinCellViewP lib cell viewname 
+                                         ?new t ?comment "Checkin via pckLmgrCheckInCBSingle" ?silent silent ?force force ?skip skip)))
+           ((greaterp (strlen cell) 0)
+            (setq dsRet (dssCheckinCellP lib cell 
+                                         ?new t ?comment "Checkin via pckLmgrCheckInCBSingle" ?silent silent ?force force ?skip skip)))
+           ((greaterp (strlen lib) 0)
+            (setq dsRet (dssCheckinLibraryP lib 
+                                            ?new t ?comment "Checkin via pckLmgrCheckInCBSingle" ?silent silent ?force force ?skip skip)))
+           (t (pckError "pckLmgrCheckInCBSingle"  "pckLmgrCheckInCBSingle: Unhandled condition.")
+              (pckErr 999)
+              ))
+     (unless silent (printf "End DS checkin.\n"))     
+     ;;if we have layout views under cell & success count > 0, add
+     ;;extra information to return XML about version of layout cellview
+     (when (and (member "layout" (get (pckDSEnumEntities lib cell) 'views))
+                (lessp (cadr dsRet) 1))
+       (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version))
+     (putprop retDpl (car dsRet) 'success)
+     (putprop retDpl (cadr dsRet) 'failure)  
+     retDpl)))
+
+;;****f* pckDesignSync/pckLmgrCheckInCB
+;;
+;; FUNCTION
+;; 
+;; This function is the hierarchical version of pckLmgrCheckInCB
+;; 
+;; USAGE
+;;
+;; (pckLmgrCheckInCB menuname lib cell viewname filename 
+;;                   category @optional (skip nil) (silent t))
+;;****
+(defun pckLmgrCheckInCB (menuname lib cell viewname filename 
+                             category  @optional (skip nil) (silent t) (outp nil) (force t))
+  ;;we need to check-in MESH_LIB cells, but we do not care about other
+  ;;primitive cells
+  (pckErrsetFormat   
+   (unless (pckWriteAccessToLibP lib)
+     (pckErr 3 (sprintf nil "No write access to library %s." lib)))
+   (when (pckHierLockP lib cell "layout")
+     (pckErr 4))
+   (importSkillVar TCC_PRIM_LIBS)
+   (importSkillVar MESH_LIB)
+   (importSkillVar MESHOLD_LIB)
+   (let ((skipLibs (setof x TCC_PRIM_LIBS (or (nequal x MESH_LIB)
+                                              (nequal x MESHOLD_LIB))))
+         (fail_count 0)
+         (pass_count 0)
+         subcells
+         (retDpl (ncons nil))
+         dsResults)
+     (when (equal viewname "") ;if viewname is unspecified, default to layout
+       (setq viewname "layout"))
+     ;;get all subcells
+     (setq subcells (pckGetHierpck lib cell viewname skipLibs))
+     ;;process subcells all subcells
+     (setq dsResults (mapcar
+                      (lambda (x)
+                        (dssCheckinCellViewP (nth 0 x) (nth 1 x) (nth 2 x)
+                                             ?new t
+                                             ?comment "Checkin via pckLmgrCheckInCB"
+                                             ?silent silent
+                                             ?force force
+                                             ?skip skip))
+                      subcells))
+     (pckDebug "pckDesignSync" (sprintf nil "CI results = %L\n" dsResults))
+     ;;get pass/fail counts
+     (setq pass_count (apply 'plus (append (list 0 0)
+                                           (setof x (mapcar 'car dsResults) (fixp x)))))
+     (setq fail_count (apply 'plus (append (list 0 0)
+                                           (setof x (mapcar 'cadr dsResults) (fixp x)))))
+     (putprop retDpl pass_count 'success)
+     (putprop retDpl fail_count 'failure)
+     ;;get revision number of topcell
+     (putprop retDpl (car (parseString (dssGetViewVersionP lib cell "layout"))) 'version)
+     (pckDSCheckInCat lib cell)
+     
+     retDpl)))
+
+
+
+
+;;****f* pckDesignSync/pckWriteAccessToLibP
+;;
+;; FUNCTION
+;; 
+;; This function check (for VLW) projects whether the user has
+;; write access to a library. If user has write access return t,
+;; returns nil, otherwise. For tccdev, always return t.
+;;
+;; USAGE
+;;
+;; (pckWriteAccessToLibP lib)
+;;
+;;****
+(defun pckWriteAccessToLibP (lib)
+  (if (equal (lowerCase (getShellEnvVar "PROJECT")) "tccdev")
+      ;;if project is tccdev simply return t since this query
+      ;;makes sense for VLW projects only
+      (progn t)
+      ;;otherwise check with DS server about lib write access
+      ;;for the user that is invoking this fucntions
+      (let (cmd result)
+        (sprintf cmd "rstcl -server %s -script ACS_islibwritable.tcl -urlparams library=%s" (pckGetDsServerUrl) lib)
+        (setq result (substring (car (dssExecuteTclP cmd)) -3 1))
+        (equal result "1"))))
+
+
+;;This returns the sync://<server>:<port>/Projects/<PrjName> URL
+(defun pckGetDsProjUrl (prjName)
+  (let ((url (pckGetDsServerUrl)))    
+    (if (nindex url "Projects")
+        (strcat (pckGetDsServerUrl) prjName)
+        (strcat (pckGetDsServerUrl) "Projects/" prjName))))
+
+
+;;Returns server URL e.g. sync://ptdls041.ra.intel.com:2647/
+;;instead of using url servers command which does not work when
+;;more than one server is used by the project we are using the 
+;;approach of getting the vaultPath associated with a well
+;;know library like PAD_LIB
+(defun pckGetDsServerUrl ()
+  (let (url urlbits)
+    (importSkillVar PAD_LIB)
+    (setq url (get (dssLibraryStatusP PAD_LIB) 'vaultPath))
+    (setq urlbits (parseString url "/"))
+    (strcat (nth 0 urlbits) "//" (nth 1 urlbits) "/" (nth 2 urlbits) "/")))
+
+
+;; This traps all DesignSync checkout operations. Unfortunaetly dssLmgrCheckOutCB
+;; is a non-blocking dialog box.
+(defun pckLmgrCheckOutCB (menuname lib cell viewname filename category)
+  (dssLmgrCheckOutCB menuname lib cell viewname filename category))
+
+
+;;Checkout the given lib/cell/view in lock mode
+;;Returns two integers: The first represents the number of
+;;objects that were successfully checked-outs. The second 
+;;represents the number of failed checked-outs. 
+;;Other failure modes return 
+(defun pckDSCheckoutLockCellView (lib cell view @optional (silent t))
+  (let (alreadyCO)        
+    ;;check if views are already locked
+    (foreach s (gdmstatus (gdmCreateSpec lib cell view nil "LibraryUnix") 7)
+         (when (and (nindex (car s) (strcat view ".sync.cds"))
+            (equal (cadr s) "gdmStateWrite"))
+           (setq alreadyCO t)))
+    (if alreadyCO
+      (list 1 0)
+      (dssCheckoutCellP lib cell ?mode "lock" ?silent silent ?viewNames (list view)))))
+
+
+;;****f* pckDesignSync/pckIsCheckedoutP
+;;
+;; FUNCTION
+;;
+;; Given lib, cell, view and file check if object is checkedout.
+;; This uses gdm calls. If object is checked-out returns t; otherwise
+;; returns nil. If object is not under revision control, returns nil.
+;;
+;; USAGE
+;;
+;; (pckGetDSVersion lib cell view @optional file)
+;;
+;; (pckGetDSVersion "lib1" "cell1" "schematic" "prop.xx")
+;; (pckGetDSVersion "lib1" "cell1" "layout")
+;;
+;;****
+(defun pckIsCheckedoutP (lib cell view @optional (file "*"))
+    (let (returnval childPID (fileDDId (ddGetObj lib cell view file)))
+      (if (ddIsPathManaged (getSGq fileDDId readPath))
+          (progn
+            (setq childPID 
+                  (ipcBeginProcess 
+                   (sprintf nil "gdmstatus -file %s " 
+                            (getSGq fileDDId readPath))) )
+            (ipcWaitForProcess childPID)
+            (setq returnval (ipcReadProcess childPID 60))
+            (equal (car (parseString returnval " ")) "COUT"))
+          nil)))
+
+
+;;****f* pckDesignSync/pckIsCheckedoutP
+;;
+;; FUNCTION
+;;
+;; Check if a checked-out cell is modified. If object is not
+;; under revision control or the checked-out object has not been
+;; modified, returns nil; returns t otherwise. This uses gdm calls.
+;; An alternative is to use the dssIsViewLockedP/dssIsFileLockedP.
+;;
+;; USAGE
+;;
+;; (pckIsModifiedP lib cell view @optional file)
+;;
+;; (pckIsModifiedP "lib1" "cell1" "schematic" "prop.xx")
+;; (pckIsModifiedP "lib1" "cell1" "layout")
+;;
+;;****
+(defun pckIsModifiedP (lib cell view @optional (file "*"))
+  (let ((obj (ddGetObj lib cell view file))
+        returnval childPID modflag)
+    (if (ddIsPathManaged (obj~>readPath))
+        (progn
+          (setq childPID 
+                (ipcBeginProcess 
+                 (sprintf nil "gdmstatus -file %s -modified" 
+                          (obj~>readPath))) )
+          (ipcWaitForProcess childPID)
+          (setq returnval (ipcReadProcess childPID 60))
+          (setq modflag (car (parseString returnval)))
+          (equal (substring modflag (strlen modflag)) "*"))
+        nil)))
+
+
+;;****f* pckDesignSync/pckGetHierpck
+;;
+;; FUNCTION
+;;
+;; Return all cells that are part of the hierarchy AND return t for the
+;; (pckpckGenP lib cell view) call. The optional parameter skipLibs
+;; is a list of library names that are skipped when traversing the
+;; hierarchy; it is set to TCC_PRIM_LIBS by default.
+;; TCC_PRIM_LIBS is usaually set to PAD_LIBS. MESH_LIBS, AUX_LIBS, pcell lib
+;;
+;; USAGE
+;;
+;; (pckGetHierpck "lib1" "cell1" "layout")
+;;  - skip TCC_PRIM_LIBS libraries
+;; (pckGetHierpck "lib1" "cell1" "layout" nil)
+;;  - do not skip primitive libraries
+;;
+;;****
+(defun pckGetHierpck (lib cell view @optional (skipLibs nil))
+  (let (subcells tcc_subcells)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq subcells 
+          (if skipLibs 
+              (dssListHierarchyP lib cell view
+                                 ?switchList (list view)
+                                 ?switchLibChoice 'not
+                                 ?switchLibNames skipLibs)
+              (dssListHierarchyP lib cell view
+                                 ?switchList (list view))))
+    (setq tcc_subcells (setof x subcells (pckGetpckGen (nth 0 x) (nth 1 x) (nth 2 x))))
+    ;;make sure that tcc_subcells always contains top-level
+    (unless (member (list lib cell view) tcc_subcells)      
+      (setq tcc_subcells (cons (list lib cell view) tcc_subcells)))
+    tcc_subcells))
+
+
+;;****f* pckDesignSync/pckHierLockP
+;;
+;; FUNCTION
+;;
+;; Checks whether any of the cells in the hierarchy have been locked by
+;; an user other than the one running the function. Also check, for
+;; locked cellviews, if the cellview has been locked in the local
+;; workspace. 
+;;
+;; USAGE
+;;
+;; (pckHierLockP "lib1" "cell1" "layout")
+;;  - skip primitive libraries
+;; (pckHierLockP "lib1" "cell1" "layout" nil)
+;;  - do not skip primitive libraries
+;;
+;; When there are no checkouts in the hierarchy that the user does
+;; not already have a lock on, this function retruns nil.
+;; If there are locks in the hierarchy by some-one other than the
+;; user returns t.
+;;
+;;****
+(defun pckHierLockP (lib cell view @optional (skipLibs nil))
+  (let ((user (getShellEnvVar "USER")) subcells        
+        lockers hier_locked thislocked)
+    (unless skipLibs
+      (importSkillVar TCC_PRIM_LIBS)
+      (setq skipLibs TCC_PRIM_LIBS)
+      )
+    (setq subcells (pckGetHierpck lib cell view skipLibs))
+    (importSkillVar TCC_DA_NAME)
+    (setq lockers (mapcar
+                   (lambda (x)
+                     (if (equal (getShellEnvVar "PROJECT") "tccdev")
+                         (list (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault t)
+                               x)
+                         (list (dssIsViewLockedP (nth 0 x) (nth 1 x) (nth 2 x) ?vault nil)
+                               x)))
+                     subcells))    
+    (foreach l lockers
+             (setq thislocked (and (not (null (car l))) (not (member (car l) (list user TCC_DA_NAME)))))
+             (when thislocked
+               (pckInfo "pckDesignSync" (sprintf nil "%L locked by %s." (cadr l) (car l))))
+             (setq hier_locked (or hier_locked thislocked)))
+    hier_locked))
+
+
+
+;;
+;;
+;; Returns Category name based on the setup environemnt
+;; 
+(defun pckDSGetCategoryNameP (lib cell @optional (top nil))
+  "Returns Category name based on the setup environment"
+  (let (cat_name
+        (lib_parts (parseString lib "_"))
+        (root (getShellEnvVar "DB_ROOT"))
+        (mounts (getShellEnvVar "MOUNTS"))
+        (project (getShellEnvVar "PROJECT")))
+    (if (equal project "tccdev")
+        (sprintf cat_name "%s/%s/%s/%s/%s/%s" root project
+                 (strcat (nth 0 lib_parts) "_" (nth 1 lib_parts))
+                 (nth 2 lib_parts)
+                 lib
+                 (if top (strcat lib ".TopCat") (strcat cell ".Cat"))
+                 )
+        (sprintf cat_name "%s/projects/%s/db/%s/%s/work/%s/%s"
+                 mounts project
+                 (nth 2 lib_parts)
+                 (nth 0 lib_parts)
+                 lib
+                 (if top (strcat lib ".TopCat") (strcat cell ".Cat"))
+                 )
+        
+        )
+    cat_name
+    )
+  )
+;;
+;; Identifies and attempts to check out Category file
+;; 
+(defun pckDSCheckoutLockCat (lib cell @optional (top nil)) 
+  "Identifies and attempts to check out Category file"
+  (let (cat_name
+        cat_obj ret user_lock
+        (project (getShellEnvVar "PROJECT"))            
+        )
+    (unless (nequal (length (parseString lib "_")) 3)
+      (setq cat_name (pckDSGetCategoryNameP lib cell top))
+      (setq cat_obj (ddCatOpen (ddGetObj lib) cell "r" ))
+      (when (and
+             (isFile cat_name)
+             (ddIsPathManaged cat_name))
+        ;; category file exists and is managed by DS            
+        (setq ret (dssCheckoutFileP cat_name ?mode "lock" ?force t ?silent nil))
+        (when (and (nequal (cadr ret) 0)
+                   (nequal (getShellEnvVar "USER")
+                           (dssIsFileLockedP  cat_name ?vault (if (equal project "tccdev") t nil)))
+                   ) 
+          ;;
+          ;; category file locking still failed
+          (pckDebug "pckDSCheckoutLockCat"
+                    (sprintf nil "Locking category %s failed. File locked by %L" cat_name
+                             (dssIsFileLockedP  cat_name
+                                                ?vault (if (equal project "tccdev") t nil))))
+          (pckErr 999 (sprintf nil "Locking category %s failed. File locked by '%s'." cat_name
+                               (dssIsFileLockedP  cat_name 
+                                                  ?vault (if (equal project "tccdev") t nil))) )
+          )
+        ) ;; top when
+      )
+    t
+    )
+  )
+
+(defun pckImplicitCOTopCat (lib cell)
+  "CO TopCat file for the library if necessary"
+  (let (cat_name (project (getShellEnvVar "PROJECT")))
+    ;;
+    ;; quick check if we are dealing with non-UE library.
+    (unless (nequal (length (parseString lib "_")) 3)
+      (setq cat_name (pckDSGetCategoryNameP lib "" t))
+      (when (and (isFile cat_name)
+                 (ddIsPathManaged cat_name)
+                 (not (dssIsFileLockedP  cat_name ?vault (if (equal project "tccdev") t nil)))
+                 ;; this setting assumes that Topcat will be opened when
+                 ;; category named cell is not present in it
+                 (not (member cell (ddCatGetLibCats (ddGetObj lib)))) 
+               )
+        (pckInfo "pckImplicitCOTopCat" (sprintf nil "Performing implicit checkout of %s" cat_name) )
+        (pckDSCheckoutLockCat lib cell t)
+        )      
+     )
+    )
+  )
+
+
+(defun pckDSCheckInCat (lib cell @optional (top nil)) 
+  "Identifies and attempts to check-in Category file"
+  (let (cat_name
+        cat_obj ret user_lock
+        (project (getShellEnvVar "PROJECT"))            
+        )
+    (unless (nequal (length (parseString lib "_")) 3)
+      (setq cat_name (pckDSGetCategoryNameP lib cell top))
+      (setq cat_obj (ddCatOpen (ddGetObj lib) cell "r" ))
+      (when (and
+             (isFile cat_name)
+             (ddIsPathManaged cat_name)           
+             )
+        ;; category file exists and is managed by DS            
+        (setq ret (dssCheckinFileP cat_name ?force t ?silent nil ?new t ?skip t))
+        (when (and (nequal (cadr ret) 0)
+                   (not (dssIsFileLockedP  cat_name ?vault (if (equal project "tccdev") t nil)))) 
+          ;;
+          ;; category file locking still failed
+          (pckDebug "pckDSCheckInCat"
+                    (sprintf nil "Check-in %s failed. File locked by %L" cat_name 
+                             (dssIsFileLockedP  cat_name
+                                                ?vault (if (equal project "tccdev") t nil))))
+          (pckErr 999 (sprintf nil "Check-in category %s failed. File locked by '%s'." cat_name 
+                               (dssIsFileLockedP  cat_name 
+                                                  ?vault (if (equal project "tccdev") t nil))) )
+          )
+        ) ;; top when
+      )
+    t
+    )
+  )
+(defun pckImplicitCITopCat (lib cell)
+  "CI TopCat file for the library if necessary"
+  (let (cat_name
+        (project (getShellEnvVar "PROJECT")))
+    (unless (nequal (length (parseString lib "_")) 3)
+      (setq cat_name (pckDSGetCategoryNameP lib "" t))
+      (when (and (isFile cat_name)
+                 (ddIsPathManaged cat_name)
+                 (dssIsFileLockedP  cat_name ?vault (if (equal project "tccdev") t nil)))
+        (pckInfo "pckImplicitCITopCat" (sprintf nil "Performing implicit checkin of %s" cat_name))
+        (pckDSCheckInCat lib cell t)
+      )
+      )
+    )
+  )
+/*
+(defun foobs ()
+  ;;
+  ;; with prop.xx
+  (dssListHierarchyP lib cell view
+                     ?switchList (list "layout")
+                     ?switchLibChoice "only"
+                     ?switchLibNames (list lib)                     
+                     ?processFiles "cell"
+                     ?silent nil                     
+                     )
+  (dssListHierarchyP lib cell view
+                     ?switchList (list "layout")
+                     ?switchLibChoice "only"
+                     ?switchLibNames (list lib)                     
+                     ?processFiles nil
+                     ?silent nil                     
+                     )
+  (dssCheckinHierarchyP lib cell view
+                       ?switchList (list "layout")
+                       ?new t
+                       ?skip t
+                       ?force t
+                       ?mode "share"
+                       ?switchLibChoice "only"
+                       ?switchLibNames (list lib)
+                       ?processFiles "cell" ?silent nil)
+  (mapcar (lambda (x)
+            (dssIsViewLockedP (car x) (cadr x) "layout" ?vault t))
+          (dssListHierarchyP lib cell view
+                             ?switchList (list "layout")
+                             ?switchLibChoice "only"
+                             ?switchLibNames (list lib)
+                             ?processFiles nil
+                             ?silent nil))
+  )
+*/
+;;(setq pckLmgrCheckInCBOld   pckLmgrCheckInCB)
+;;(setq pckLmgrCheckIn pckDSCheckInNew)

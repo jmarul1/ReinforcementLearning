@@ -1,0 +1,540 @@
+#!/usr/intel/bin/python
+# -*- coding: utf-8 -*-
+
+import pdkutils
+import os
+import argparse
+import sys
+import subprocess
+import re
+
+if "USER" in os.environ:
+	user = os.environ["USER"]
+else:
+	print("\nUnix USER env variable not found\n")
+	sys.exit(1)
+
+if "INTEL_PDK" in os.environ:
+	intel_pdk = os.environ["INTEL_PDK"]
+else:
+	print("\nUnix INTEL_PDK env variable not found. Please enter adrf environment\n")
+	sys.exit(1)
+
+if "INTEL_RF" in os.environ:
+	intel_rf = os.environ["INTEL_RF"]
+else:
+	print("\nUnix INTEL_RF env variable not found. Please enter adrf environment\n")
+	sys.exit(1)
+
+if "WARD" in os.environ:
+	user_dir = os.environ["WARD"]
+else:
+	user_dir = '/nfs/pdx/disks/wict_wd/' + user
+	print("\nUnix WARD env variable not found. Running flow in: " + user_dir + " \n")
+
+class MyParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
+
+jivaroChoices = ['accurate','standard','rate','highRate','hugeRate','noReduction','noJivaro']
+
+parser=MyParser(description='Extaction script for the AdRF environment.')
+parser.add_argument('library', help='Name of library.')
+parser.add_argument('cell', help='Name of cell. The layout and schematic view must be in the same cell.')
+parser.add_argument('-v', '--view', default='dspf', help='View name for dspf. Default is dspf.')
+parser.add_argument('-qa', action='store_true', help='Print QA results.')
+parser.add_argument('-lvs', action='store_true', help='Run LVS only.')
+parser.add_argument('-t', '--temp', default='65', help='Temperature.')
+parser.add_argument('-oa', action='store_true', help='Create OA (starrcxt) view instead of dspf view. Jivaro not supported.')
+parser.add_argument('-j', '--jivaro', metavar='', choices = jivaroChoices, default='noJivaro', help='Jivaro pre-defined criterions. Allowed values are ' + ', '.join(jivaroChoices) + '. Reduction is skipped by default.')
+parser.add_argument('-b','--blackbox', nargs='+', help='Space separated list of black box cells')
+parser.add_argument('-lay', default='layout', help='Layout view name for GDS creation. Default is layout.')
+parser.add_argument('-sch', default='schematic', help='Schematic view name for netlist creation. Default is schematic.')
+
+group1 = parser.add_mutually_exclusive_group()
+group1.add_argument('-l', '--load', action='store_true', help='Only loads the extracted view into Virtuoso.')
+group1.add_argument('-e', '--extract', action='store_true', help='Only runs extraction and does not load into Virtuoso.')
+
+group2 = parser.add_mutually_exclusive_group()
+group2.add_argument('-c', '--conly', action='store_true', help='Run capacitance only extraction.')
+group2.add_argument('-r', '--ronly', action='store_true', help='Run resistance only extraction.')
+
+args = parser.parse_args()
+
+run_dir = user_dir + '/xtract/' + args.cell
+spf_file = run_dir + '/' + args.cell + '.spf'
+oa_file = run_dir + '/' + args.cell + '.oa'
+jivaro_output_file = spf_file + '.jivaro'
+simrc_file = run_dir + '/.simrc'
+si_env_file = run_dir + '/si.env'
+starrc_command_file = run_dir + '/star_ccp.custom.cmd'
+
+print '\n====================================================================================================='
+print 'Extraction Script Start'
+print '=====================================================================================================\n'
+
+if not os.path.isdir(user_dir + '/xtract'):
+	os.mkdir(user_dir + '/xtract')
+if not os.path.isdir(run_dir):
+	os.mkdir(run_dir)
+if not os.path.exists(run_dir + '/cds.lib'):
+	os.system('ln -s ' + user_dir + '/cds.lib ' + run_dir + '/cds.lib')
+
+if (args.load == False):
+
+	log_path = run_dir + '/' + args.cell + '.gds.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Creating GDS...')
+		sys.stdout.flush()
+		process = subprocess.Popen('strmout -library ' + args.library + ' -topCell ' + args.cell + ' -view ' + args.lay + ' -strmFile ' + args.cell + '.gds', cwd=run_dir, shell=True, stdout=stdout, stderr=stdout)
+		process.wait()
+	run_OK = 0
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".*Translation completed. '0' error\(s\)", line)
+			if match:
+				run_OK = 1
+		if run_OK:
+			sys.stdout.write('Completed\n\n')
+		else:
+			sys.stdout.write('Stream Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+			sys.exit(1)
+
+	with open(simrc_file,'w') as simrcfile:
+		simrcfile.write('auCdlPrintMultiplicityFactor=t\n')
+		simrcfile.write('auCdlCDFPinCntrl=t\n')
+
+	with open(si_env_file,'w') as sifile:
+		sifile.write('simLibName = "' + args.library + '"\n')
+		sifile.write('simCellName = "' + args.cell + '"\n')
+		sifile.write('simRunDir = "."\n')
+		sifile.write('hnlNetlistFileName = "' + args.cell + '.cdl"\n')
+		sifile.write('incFILE = "'+(' '.join(pdkutils.getCdlIncludes()))+ '"\n')
+		sifile.write('simViewName = "' + args.sch + '"\n')
+		sifile.write('simSimulator = "auCdl"\n')
+		sifile.write('simNotIncremental = \'nil\n')
+		sifile.write('simReNetlistAll = \'nil\n')
+		sifile.write('simViewList = \'("auCdl" "schematic")\n')
+		sifile.write('simStopList = \'("auCdl")\n')
+		sifile.write('resistorModel = ""\n')
+		sifile.write('shortRES = 2000.0\n')
+		sifile.write('preserveRES = \'t\n')
+		sifile.write('checkRESVAL = \'t\n')
+		sifile.write('checkRESSIZE = \'nil\n')
+		sifile.write('preserveCAP = \'t\n')
+		sifile.write('checkCAPVAL = \'t\n')
+		sifile.write('checkCAPAREA = \'nil\n')
+		sifile.write('preserveDIO = \'t\n')
+		sifile.write('checkDIOAREA = \'t\n')
+		sifile.write('checkDIOPERI = \'t\n')
+		sifile.write('checkCAPPERI = \'nil\n')
+		sifile.write('simPrintInhConnAttributes = \'nil\n')
+		sifile.write('checkScale = "meter"\n')
+		sifile.write('checkLDD = \'nil\n')
+		sifile.write('pinMAP = \'t\n')
+		sifile.write('shrinkFACTOR = 0.0\n')
+		sifile.write('globalPowerSig = ""\n')
+		sifile.write('displayPININFO = \'t\n')
+		sifile.write('preserveALL = \'nil\n')
+		sifile.write('setEQUIV = ""\n')
+		sifile.write('pinMAP = \'nil\n')
+		sifile.write('preserveBangInNetlist = \'t\n')
+		sifile.write('setEQUIV = "vss=vss!"\n')
+
+
+
+	log_path = run_dir + '/' + args.cell + '.cdl.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Creating Netlist...')
+		sys.stdout.flush()
+		process = subprocess.Popen('si -cdslib ' + user_dir + '/cds.lib -batch -command netlist', cwd=run_dir, shell=True, stdout=stdout, stderr=stdout)
+		process.wait()
+	run_OK = 0
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".*End netlisting", line)
+			if match:
+				run_OK = 1
+		if run_OK:
+			sys.stdout.write('Completed\n\n')
+		else:
+			sys.stdout.write('Netlist Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+			sys.exit(1)
+
+	log_path = run_dir + '/' + args.cell + '.icv.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Running LVS...')
+		sys.stdout.flush()
+		lvs_command = 'icv -D _drRCextract -D _drPROCESS=_drdotTwentyTwo -D _drICFOAlayers -D _drIncludePort -i ' + args.cell + '.gds -s ' + args.cell + '.cdl -sf SPICE -f GDSII -c ' + args.cell + ' -vue -I $INTEL_RUNSETS/PXL $INTEL_RUNSETS/trclvs.rs'
+		process = subprocess.Popen(lvs_command, cwd=run_dir, shell=True, stdout=stdout, stderr=stdout)
+		process.wait()
+	run_OK = 0
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".*IC Validator is done", line)
+			if match:
+				run_OK = 1
+			
+		if run_OK:
+			sys.stdout.write('Completed\n\n')
+		else:
+			sys.stdout.write('LVS Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+			sys.exit(1)
+
+	log_path = run_dir + '/' + args.cell + '.LVS_ERRORS'
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".*Final comparison result:FAIL", line)
+			if match:
+				sys.stdout.write('LVS Error\n')
+				sys.stdout.write('See Log File: ' + log_path + '\n\n')
+				if args.qa:
+					sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+				sys.exit(1)
+
+	if args.lvs:
+		if args.qa:
+			sys.stdout.write('QA_RESULTS:' + args.cell + ':PASS\n\n')
+		sys.exit(1)
+
+	with open(starrc_command_file,'w') as command_file:
+		command_file.write('** Data Base\n')
+		command_file.write('BLOCK: ' + args.cell + '\n')
+		command_file.write('IGNORE_CAPACITANCE: ALL\n')
+		command_file.write('MOS_GATE_CAPACITANCE: 0.0\n')
+		command_file.write('XREF: YES\n')
+		command_file.write('NET_TYPE: schematic\n')
+
+		command_file.write('** Technology\n')
+		command_file.write('* FILE_NXTGRD = ' + intel_pdk + '/extraction/starrc/techfiles/be2/tttt.nxtgrd\n')
+		command_file.write('* SKEW = See release notes for available skews.\n')
+		command_file.write('TCAD_GRD_FILE: ' + intel_pdk + '/extraction/starrc/techfiles/be2/tttt.nxtgrd\n')
+		command_file.write('MAPPING_FILE: starrc.map\n')
+		command_file.write('MAGNIFICATION_FACTOR: 1\n')
+		command_file.write('MAGNIFY_DEVICE_PARAMS: NO\n')
+		command_file.write('REPORT_SMIN_VIOLATION: YES\n')
+
+		command_file.write('** General\n')
+		command_file.write('VERBOSE: NO\n')
+		command_file.write('* Set VALUE_STARRC_CASESENSE to YES|NO\n')
+		command_file.write('CASE_SENSITIVE: YES\n')
+		command_file.write('STAR_DIRECTORY: star\n')
+		command_file.write('BUS_BIT: []\n')
+
+		command_file.write('** Accuracy\n')
+		command_file.write('EXTRACTION: RC\n')
+
+		command_file.write('** VALUE_TEMPERATURE to be referenced from userguide.\n')
+		command_file.write('OPERATING_TEMPERATURE: ' + args.temp + '\n')
+		command_file.write('EXTRACT_VIA_CAPS: YES\n')
+
+		command_file.write('** Nets to Extract\n')
+		command_file.write('NETS: *\n')
+		command_file.write('POWER_NETS: VCC* vcc* VDD* vdd* VSS* vss*\n')
+		command_file.write('* VALUE_POWER_EXTRACT should be set based on project\n')
+		command_file.write('POWER_EXTRACT: YES\n')  
+
+		command_file.write('** Pin Handling\n')
+		command_file.write('SHORT_PINS: YES\n')
+		command_file.write('INSTANCE_PORT: SUPERCONDUCTIVE CELL * INST * PORT *\n')
+		command_file.write('MARKER_GENERATION: USER\n')
+		command_file.write('TRANSLATE_RETAIN_BULK_LAYERS: YES\n')
+		command_file.write('PIN_CUT_LOCATION_CENTER: YES\n')
+
+		command_file.write('** Via Handling\n')
+		command_file.write('* FILE_CUSTOM_VIACOV = ' + intel_pdk + '/extraction/starrc/techfiles/be2/tttt.via_coverage.custom\n')
+		command_file.write('VIA_COVERAGE_OPTION_FILE: ' + intel_pdk + '/extraction/starrc/techfiles/be2/tttt.via_coverage.custom\n')
+		command_file.write('KEEP_VIA_NODES: YES\n')
+		command_file.write('MERGE_VIAS_IN_ARRAY: NO\n')
+		command_file.write('TRANSLATE_VIA_LAYERS: YES\n')
+		command_file.write('RV_VIA_EXTRACT_PROPERTY: SAVL SAVC\n')
+
+		command_file.write('** RV Related\n')
+		command_file.write('* VALUE_NODE_MODE = NODE or NONE or NODE RES\n')
+		command_file.write('EXTRA_GEOMETRY_INFO: NODE RES\n')
+
+		command_file.write('** Reduction\n')
+		command_file.write('REDUCTION: NO\n')
+		command_file.write('POWER_REDUCTION: NO\n')
+		command_file.write('REDUCTION_MAX_DELAY_ERROR: 1.0e-15\n')
+
+		command_file.write('** Threshold\n')
+		command_file.write('GROUND_CROSS_COUPLING: NO\n')
+		command_file.write('COUPLING_ABS_THRESHOLD: 0.0\n')
+		command_file.write('COUPLING_REL_THRESHOLD: 0.0\n')
+		command_file.write('COUPLE_TO_GROUND: NO\n')
+		command_file.write('* NETLIST_MINCAP_THRESHOLD: 0.0\n')
+		command_file.write('* NETLIST_MINRES_HANDLING: SHORT\n')
+		command_file.write('* NETLIST_MINRES_THRESHOLD: 0.001\n')
+
+		command_file.write('** Fill Track handling\n')
+		command_file.write('METAL_FILL_POLYGON_HANDLING: FLOATING\n')
+		command_file.write('TRANSLATE_FLOATING_AS_FILL: YES\n')
+		command_file.write('REMOVE_FLOATING_NETS: NO\n')
+		command_file.write('REMOVE_DANGLING_NETS: NO\n')
+
+		command_file.write('** Netlist Options\n')
+		command_file.write('NETLIST_CONNECT_SECTION: YES\n')
+		command_file.write('NETLIST_NODE_SECTION: YES\n')
+		command_file.write('NETLIST_NODENAME_NETNAME: YES\n')
+		command_file.write('NETLIST_UNSCALED_COORDINATES: YES\n')
+		command_file.write('NETLIST_CONNECT_OPENS: !*\n')
+
+		command_file.write('* VALUE_TAILCOMMENTS = YES or NO\n')
+		command_file.write('* Change VALUE_TAILCOMMENTS based on RV setting and Reduction\n')
+		command_file.write('NETLIST_TAIL_COMMENTS: YES\n')
+		command_file.write('* VALUE_FORMAT = spf or spef or oa\n')
+
+		if args.oa:
+			command_file.write('NETLIST_FORMAT: oa\n')
+			command_file.write('NETLIST_FILE: ' + oa_file + '\n')
+		else:
+			command_file.write('NETLIST_FORMAT: spf\n')
+			command_file.write('NETLIST_FILE: ' + spf_file + '\n')
+
+		if args.conly:
+			command_file.write('NETLIST_TYPE: Cc *\n')
+		elif args.ronly:
+			command_file.write('NETLIST_TYPE: R *\n')
+		else:
+			command_file.write('NETLIST_TYPE: RCc *\n')
+
+		command_file.write('NETLIST_SELECT_NETS: * \n')
+		command_file.write('NETLIST_COUPLE_UNSELECTED_NETS: IDEAL\n')
+		command_file.write('NETLIST_NAME_MAP: YES\n')
+		command_file.write('NETLIST_PASSIVE_PARAMS: YES\n')
+		command_file.write('NETLIST_DEVICE_LOCATION_ORIENTATION: YES\n')
+		command_file.write('NETLIST_PRECISION: 8\n')
+		command_file.write('ANGSTROM_DBUNIT_SUFFIX: NO\n')
+
+		command_file.write('** Spice File Options\n')
+		#command_file.write('NETLIST_IDEAL_SPICE_FILE: ' + args.cell + '.dpf\n')
+		#command_file.write('NETLIST_IDEAL_SPICE_HIER: YES\n')
+		#command_file.write('NETLIST_IDEAL_SPICE_TYPE: SCHEMATIC\n')
+		command_file.write('SPICE_SUBCKT_FILE: ' + args.cell + '.cdl\n')
+
+
+		command_file.write('** Xtractor options\n')
+		command_file.write('Mdb: 1357531\n')
+		command_file.write('STRICT_CELL_OVERLAP_HANDLING: YES\n')
+
+		command_file.write('** CCP\n')
+		command_file.write('CCP_EXTRACTION_FILE: ccp.cmd\n')
+		command_file.write('CCP_ANNOTATION_FILE: YES\n')
+
+		command_file.write('** S/D Swapping in upper case\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: SNDI SIDN\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: SHRD SHRS\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: SNDF SFDN\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: SFDI SIDF\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: PES PED\n')
+
+		command_file.write('**S/D Swapping\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: sndi sidn\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: shrd shrs\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: sndf sfdn\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: sfdi sidf\n')
+		command_file.write('XREF_SWAP_MOS_SD_PROPERTY: pes ped\n')
+
+		command_file.write('** BLACKBOXING\n')
+		command_file.write('CELL_TYPE: LAYOUT\n')
+		if args.blackbox:
+			command_file.write('SKIP_CELLS: ' + " ".join(args.blackbox) + ' \n')
+		else:
+			command_file.write('SKIP_CELLS: !*\n')
+
+		command_file.write('*** Additional flow-specific commands\n')
+
+		command_file.write('** ICV-StarRC flow\n')
+		command_file.write('* ICV_STARRC_FLOW_ENABLED = <blank> for ICV-StarRC flow \n')
+		command_file.write('MILKYWAY_DATABASE: milkyway\n')
+		command_file.write('MILKYWAY_EXTRACT_VIEW: YES\n')
+		command_file.write('ICV_RUNSET_REPORT_FILE: starrc.report\n')
+
+		command_file.write('** Temperature Sensitive flow\n')
+		command_file.write('* VALUE_MODE_TEMP_SENSE = YES or NO\n')
+		command_file.write('TEMPERATURE_SENSITIVITY: NO\n')
+
+
+		#command_file.write('**** These are commands/options meant only for Netlist-based Reliability Verification\n')
+		#command_file.write('** Refer Reliability flow documentation on the use of these options\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>DETECT_FUSE: YES\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>PRINT_RV_FUSE: YES\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>RV_PRINT_RESISTOR_TYPE: YES\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>PRINT_CURRENT_DIRECTION: YES\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>PRINT_SILICON_INFO: YES\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>SHORT_PINS: NO\n')
+		#command_file.write('<ENABLE_RV_OPTIONS>REMOVE_DANGLING_NETS: NO\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>INSTANCE_PORT: CONDUCTIVE MULTIPLE SUFFIXED CELL * INST * PORT *\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>INSTANCE_PORT: SUPERCONDUCTIVE CELL b811tsv2ptn6000xnxunx b811tsv1ptn6000xnxunx\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>ENHANCED_SKIPCELLS_HANDLING: YES\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>ENHANCED_VIA_MODEL_FOR_VIA_COVERAGE: YES \n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>NETLIST_RENAME_PORTS: XYI\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>PLACEMENT_INFO_FILE: YES\n')
+		#command_file.write('<ENABLE_RV_TEMPLATE_OPTIONS>PLACEMENT_INFO_FILE_NAME: <VALUE_TOPCELL>.xyv\n')
+		#command_file.write("<ENABLE_RV_TEMPLATE_OPTIONS>NETLIST_POSTPROCESS_COMMAND: perl -ane '{s/_x_?\d+y_?\d+_\d+/ /ig; print $_}"\n')
+
+		#command_file.write('** Distributed processing\n')
+		#command_file.write('<ENABLE_DISTRIBUTED_PROCESSING>NUM_CORES: <VALUE_NUMBER_DP_CPUS>\n')
+		#command_file.write('<ENABLE_DISTRIBUTED_PROCESSING>STARRC_DP_STRING: <SSH_STRING_STARRC_JOB_DP>\n')
+
+		#command_file.write('** Simultaneous Multi Corner flow\n')
+		#command_file.write('<ENABLE_SMC_FLOW>CORNERS_FILE: corners.defines\n')
+		#command_file.write('<ENABLE_SMC_FLOW>SIMULTANEOUS_MULTI_CORNER: YES\n')
+		#command_file.write('<ENABLE_SMC_FLOW>SELECTED_CORNERS: <SELECTED_CORNER_LIST>\n')
+		#command_file.write('<ENABLE_SMC_FLOW>NETLIST_SMC_FORMULA: <VALUE_SMCFORMULA>\n')
+
+		if args.oa:
+			command_file.write('** OA extracted view options\n')
+			command_file.write('HIERARCHICAL_SEPARATOR: |\n')
+			command_file.write('OA_DEVICE_MAPPING_FILE: ' + intel_pdk + '/extraction/starrc/oadevmap/be2/oa_dfii_devmap\n')
+			command_file.write('OA_LAYER_MAPPING_FILE: oalayers.starrc.map\n')
+			command_file.write('OA_LIB_DEF: cds.lib\n')
+			command_file.write('OA_LIB_NAME: ' + args.library + '\n')
+			command_file.write('OA_VIEW_NAME: starrc\n')
+			command_file.write('OA_REMOVE_DUPLICATE_PORTS: YES\n')
+			command_file.write('OA_MARKER_SIZE: 0.01\n')
+			command_file.write('OA_INSTANCE_PIN_NAME: symbol\n')
+			#command_file.write('OA_SKIPCELL_MAPPING_FILE: oa_skipcells.map\n')
+			command_file.write('NETLIST_GROUND_NODE_NAME: gnd!\n')
+			command_file.write('OA_BUS_BIT: <>\n')
+			command_file.write('OA_CDLOUT_RUNDIR: .\n')
+
+		command_file.write('** Skip pcell flow\n')
+		command_file.write('SKIP_PCELLS: *b88xp_dcps2p_unit* *b88xp_mfc_unit* *b88xp_tfr_unit* *b88xp_tfr_fill* *b88xp_tfrdacbody* *b88xp_tfrdaccon* *b88xp_mim* *b88x_ednrf_* *b88x_edprf_* *b88xp_nrf_* *b88xp_prf_* *b88xp_nlvtrf_* *b88xp_plvtrf_* *b88xp_ntgrf_* *b88xp_ptgrf_* *b88xp_nrfhp_* *b88xp_prfhp_* *b88xp_ndnwrfhp_* *b88xp_nrfll_* *b88xp_prfll_* *b88xp_nlvtrfll_* *b88xp_plvtrfll_* *cap_hd* *b88xp_poly_* *b88xp_polynwl_* *b88xp_polypara_* *b88xp_polyparanwl_* *b88xp_polyser_* *b88xp_polysernwl_* *b88xp_gcn_* *b88xp_gcnnwl_* *b88xp_gcnpara_* *b88xp_gcnparanwl_* *b88xp_gcnser_* *b88xp_gcnsernwl_* *b88xp_nrfhyp120_* *b88xp_nrfhyp160_*\n')
+		command_file.write('SKIP_PCELL_LAYERS_FILE: ' + intel_pdk + '/extraction/starrc/icv/be2/skip_pcell_layers_file\n')
+		command_file.write('RETAIN_CAPACITANCE_CAP_MODELS: b88xp_mfcs2s b88xp_mfcs2sds b88xp_mfcs2sls b88xp_mfcs2sus b88xp_mfcs2p b88xp_mfcs2sns b88xp_mfcs2g b88xp_dcpstack b88xp_dcps2p b88xp_dcps2g b88xp_mim\n')
+		command_file.write('COUPLE_TO_PCELL_PINS: YES KEEP_Cg\n')
+
+	if not os.path.exists(run_dir + '/ccp.cmd'):
+		os.system('ln -s ' + intel_pdk + '/extraction/starrc/ccp/be2/ccp.cmd ' + run_dir)
+
+	log_path = run_dir + '/' + args.cell + '.starrc.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Running StarRC...')
+		sys.stdout.flush()
+		starrc_command0 = 'umask 002'
+		starrc_command1 = 'source $INTEL_PDK/extraction/starrc/ccp/be2/ccp_setup.env'
+		starrc_command2 = 'StarXtract -clean star_ccp.custom.cmd'
+		starrc_command = starrc_command0 + ' && ' + starrc_command1 + ' && ' + starrc_command2
+		process = subprocess.Popen(starrc_command, cwd=run_dir, shell=True, stdout=stdout, stderr=stdout, executable="/bin/tcsh")
+		process.wait()
+	run_OK = 1
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".*Errors: [^0]", line)
+			if match:
+				run_OK = 0
+			match = re.search(r".*ERROR", line)
+			if match:
+				run_OK = 0
+		if run_OK:
+			sys.stdout.write('Completed\n\n')
+		else:
+			sys.stdout.write('StarRC Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+			sys.exit(1)
+	if args.oa:
+		sys.exit(1) 
+
+	if os.path.exists(jivaro_output_file):
+		os.remove(jivaro_output_file)
+	
+if (args.jivaro != 'noJivaro'):
+	jivaro_file = run_dir + '/' + args.cell + '.jivaro'
+	with open(jivaro_file,'w') as file:
+		file.write('#!/bin/csh\n')
+		file.write('#\n')
+		file.write('setenv JIVAROD_ROOT /p/adx/x22a/cad_root/edxact/jivaro/V5_7_02/linux_3.0.101_x86-64/\n')
+		file.write('set path=($path $JIVAROD_ROOT/bin)\n')
+		file.write('setenv LM_LICENSE_FILE 6480@edxact02p.elic.intel.com:6480@plxs0446.pdx.intel.com\n')
+		file.write('jivaroD -inputFile ' + spf_file + ' -outputFile ' + jivaro_output_file + ' -criterion ' + args.jivaro)
+	os.system('chmod +x ' + jivaro_file)
+
+	log_path = jivaro_output_file + '.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Running Jivaro...')
+		sys.stdout.flush()
+		process = subprocess.Popen(jivaro_file, cwd=run_dir, shell=True, stdout=stdout, stderr=stdout)
+		process.wait()
+
+	jivaro_errors = 1
+	with open(log_path, 'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match = re.search(r".+Warning\D+([0-9]+)\s+Error.*", line)
+			if match:
+				jivaro_errors = int(match.group(1))
+		if (jivaro_errors != 0):
+			sys.stdout.write('Jivaro Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':FAIL\n\n')
+			sys.exit(1)
+		else:
+			sys.stdout.write('Completed\n\n')
+
+if (args.extract == False):
+	
+	if os.path.exists(jivaro_output_file):
+		spf_load_file = jivaro_output_file
+	else:
+		spf_load_file = spf_file
+	
+	log_path = run_dir + '/' + args.cell + '.load.log'
+	with open(log_path,'w') as stdout:
+		sys.stdout.write('Running Virtuoso Load...')
+		sys.stdout.flush()
+		load_command0 = 'setenv CDS5X_NOLINK 1'
+		load_command1 = 'umask 002'
+		load_command2 = 'cdsTextTo5x -lib ' + args.library + ' -cell ' + args.cell + ' -view ' + args.view + ' -cdslib cds.lib -lang dspf ' + spf_load_file
+		load_command = load_command0 + ' && ' + load_command1 + ' && ' + load_command2
+		process = subprocess.Popen(load_command, cwd=run_dir, shell=True, stdout=stdout, stderr=stdout, executable="/bin/tcsh")
+		process.wait()
+	run_OK = 0
+	with open(log_path,'r') as log:
+		lines = log.readlines()
+		for line in lines:
+			match1 = re.search(r'.*The source file is already installed in the cellview', line)
+			match2 = re.search(r'.*Successfully created 5x structure for cellview', line)
+			if match1 or match2:
+				run_OK = 1
+		if run_OK:
+			sys.stdout.write('Completed\n\n')
+		else:
+			sys.stdout.write('dspf Load Error\n')
+			sys.stdout.write('See Log File: ' + log_path + '\n\n')
+			if args.qa:
+				sys.stdout.write('QA_RESULTS:' + args.cell + ':PASS\n\n')
+			sys.exit(1)
+
+if args.qa:
+	sys.stdout.write('QA_RESULTS:' + args.cell + ':PASS\n\n')
+
+
+
+
+
+
+
+
+
+

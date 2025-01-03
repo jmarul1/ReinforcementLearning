@@ -1,0 +1,213 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Filename: pckPDSFlow.ils             Project: TCC
+;; 
+;;  Version: $Id: pckPDSFlow.ils.rca 1.2 Tue Mar 22 17:58:22 2011 pvrott Experimental $
+;; 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; Copyright Intel Corporation 2004
+;;
+;; Author: Pavel Rott
+;; Keywords: TCC Project, PDS Flow, FDRC, LVS
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Functional Description:
+;;
+;; Initiates scripts to run PDS flow in TCC window
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; (load "pckPDSFlow.ils")
+;;
+;;
+;;
+(defun pckStartPDSFlow () t)
+(defun pckCheckPdsCurrentFile () t)
+(defun pckStartPDSTimer () t)
+
+(let (_currentFile _timer _runMode _port _cellName _libName _flow _postProcessing _abortFile)
+  (importSkillVar stdout)
+;; ********************************************************************************************************************  
+  (defun _pckStartPDSFlow (cellName @key
+                                    (libName "DEFAULT")
+                                    (flow "drcd")
+                                    (inputType "stm")
+                                    (runMode "local")
+                                    (nbPool (getShellEnvVar "NBPOOL"))
+                                    (nbClass (getShellEnvVar "NBCLASS"))
+                                    (nbqSlot (getShellEnvVar "NBQSLOT"))
+                                    (traceTopCheck t)
+                                    (pdsAutotail "no")
+                                    (gdsName "DEFAULT")
+                                    (port nil)
+                                    (postProcessing t))
+    (let (display gdsFile)
+      (pckInfo "pckStartPDSFlow" "started.")
+      (unless port
+        (setq port (outfile (strcat (getShellEnvVar "PDSLOGS") "/" cellName "." flow ".check_mate.log"))))
+      ;;Initalize Globals
+      (setq _currentFile nil)
+      (setq _abortFile (strcat (getShellEnvVar "PDSLOGS") "/" cellName "." flow ".iss.log.abort"))
+      (when (isFile _abortFile)
+        (deleteFile _abortFile))
+      (setq _timer nil)
+      (setq _runMode runMode)
+      (setq _port port)
+      (setq _cellName cellName)
+      (setq _libName libName)
+      (setq _flow flow)
+      (setq _postProcessing postProcessing)
+      ;;end set globals
+      (setq display (strcat (getShellEnvVar "HOST") ":" (car (last (parseString (getShellEnvVar "DISPLAY") ":")))))
+	  ;;
+	  ;; stream the file out
+	  (fprintf stdout "Streaming out the design.")
+	  (setq gdsFile (strcat (getShellEnvVar "FDK_WORK") "/pds/stream/" cellName ".gds"))
+	  (pckMakeStreamFileNew (strcat (getShellEnvVar "FDK_WORK") "/pds/stream")
+							libName cellName "layout"
+							gdsFile)
+	  
+      ;;(setq gdsFile "DEFAULT")
+      (fprintf stdout "Initializing pdsBuilder script\n")
+      (fprintf port   "Initializing pdsBuilder script\n")
+      (_pckStartPDSBuilderScript cellName libName flow gdsFile inputType runMode nbPool nbClass nbqSlot traceTopCheck pdsAutotail display port)
+      (drain port)
+      t))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+  (defun _pckStartPDSBuilderScript (cellName libName flow gdsName inputType runMode nbPool nbClass nbqSlot traceTopCheck pdsAutotail display port)
+    (let (pdsFileName pdsWorkingDir)
+      ;;
+      ;;Start PDS job
+      ;;
+      (fprintf stdout "***** PDS job is running in the background. You will see a message in CIW and receive an email when it is done.\n" )
+      (fprintf stdout "***** Capturing PDS Builder output:\n")
+      (fprintf port "***** PDS job is running in the background. You will see a message in CIW and receive an email when it is done.\n" )
+      (fprintf port "***** Capturing PDS Builder output:\n")
+      (drain port)
+      (ipcBeginProcess (sprintf nil "%L" (_pckCreatePDSRunCommand cellName libName flow gdsName inputType runMode nbPool nbClass nbqSlot traceTopCheck pdsAutotail port)) "" _pckPdsFlowStdoutFunc _pckPdsFlowErrorFunc _pckPdsFlowStdoutFunc)
+      t))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+  (defun _pckCreateCommandFile (fileName text) 
+    (let (TMPL)     
+      (setq TMPL (outfile fileName "w"))
+      (fprintf TMPL "%s\n" text) 
+      (drain TMPL)
+      (close TMPL)))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+ (defun _pckCreatePDSRunCommand (cellName libName flow gdsName inputType runMode nbPool nbClass nbqSlot traceTopCheck pdsAutotail port)
+    (let (topframe text)
+      (if traceTopCheck
+          (topframe = "check")
+          (topframe = "nocheck"))
+      (sprintf text "%s/_pypdsbuilder -verifytool no -runmode %s -batch1 %s -batch2 %s  -batch3 %s -inputtype %s  -gdsname %s -mailuser yes -onecell no -autotail %s -mode %s -saveworkdir yes  -topframe %s -laytopcell %s -libspec %s"
+			   (getShellEnvVar "PDSPATH")
+			   runMode
+			   nbPool
+			   nbClass
+			   nbqSlot
+			   inputType
+			   gdsName
+			   pdsAutotail
+			   flow
+			   topframe
+			   cellName
+			   cellName )
+      (fprintf stdout "%L\n" text)
+      (fprintf port "%L\n" text)
+      (drain port)
+      text))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+(defun _pckPdsFlowStdoutFunc (cid data)
+    (let (jobNumber currentFile)
+      (setq currentFile (strcat (getShellEnvVar "PDSLOGS") "/" _cellName "." _flow ".iss.current"))
+      (printf "%s\n" data)
+      ;;(pckInfo "pckPdsFlowStdoutFunc" (sprintf nil "Looking for %L\n" currentFile))
+      ;;
+      ;;
+      ;; This is the function that boths echoes pds output to CIW window and
+      ;; starts job checker that searches for *.current file in case of a local job.
+      ;; Netbatch presents a more complex problem as a job may start at some later time.
+      ;;
+      (if (equal _runMode "local")
+          (progn
+            ;;(pckInfo "pckPdsFlowStdoutFunc" (sprintf nil "Local Job Check\n" currentFile))
+            ;;(pckInfo "pckPdsFlowStdoutFunc" (sprintf nil "_timer = %L\n" _timer))
+            (unless (equal _timer 1)
+              ;;(pckInfo "pckPdsFlowStdoutFunc" "_timer != 1\n")
+              (setq _currentFile currentFile )
+              (setq _timer 1)
+              (pckStartPDSTimer)))
+           (progn
+             ;;(pckInfo "pckPdsFlowStdoutFunc" (sprintf nil "Non-local Job Check\n" currentFile))
+             ;;
+             ;; PDS Timer for NETBATCH jobs. Current file may be created much, 
+             ;; much later - we need instead check 
+             ;; batch queue. But first we need to capture job number.
+             t))))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+(defun _pckPdsFlowErrorFunc (cid err)
+    (let ()
+      (printf "Error %L msg: %s\n" cid err)
+      (fprintf _port "Error %L msg: %s\n" cid err)
+      (ipcKillProcess cid)))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+  (defun _pckStartPDSTimer ()
+    (progn
+      ;;(pckInfo "pckStartPDSTimer" "started")
+      (when (equal _timer 1)
+        ;;(pckInfo "pckStartPDSTimer" "Reset timer")
+        (hiRegTimer "(pckCheckPdsCurrentFile) (pckStartPDSTimer)" 100))
+      ;;(pckInfo "pckStartPDSTimer" "finished")
+      ))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+  (defun _pckCheckPdsCurrentFile ()
+    (progn
+      ;;(pckInfo "pckCheckPdsCurrentFile" "started")
+      (unless (isFile _currentFile)
+        ;;
+        ;; Stop the timer!
+        (setq _timer 0)
+        (if (isFile _abortFile)
+          (progn
+            (fprintf stdout "***** PDS run aborted.\n")
+            (fprintf _port  "***** PDS run aborted.\n")
+            (drain _port)
+            (close _port)
+            (pckError "pck PDS Flow" "PDS run aborted")
+            (pckErr 514 "TCC PDS Flow" "PDS run aborted"))
+          (progn
+            ;;(pckInfo "pckCheckPdsCurrentFile" "Cannot find current file")
+            (fprintf stdout "***** PDS run is concluded.\n")
+            (fprintf _port  "***** PDS run is concluded.\n")
+            (drain _port)
+            (fprintf stdout "***** Calling Postprocessing function %L.\n" _postProcessing)
+            (fprintf _port  "***** Calling Postprocessing function %L.\n" _postProcessing)
+            (drain _port)
+            (eval _postProcessing)
+            (drain _port)
+            (fprintf _port "***** Postprocessing complete.\n")
+            (drain _port)
+            (close _port)
+            (fprintf stdout "***** Postprocessing complete.\n")
+            t)))))
+;; ********************************************************************************************************************
+;; ********************************************************************************************************************
+
+  (setq pckStartPDSFlow _pckStartPDSFlow)
+  (setq pckCheckPdsCurrentFile _pckCheckPdsCurrentFile)
+  (setq pckStartPDSTimer _pckStartPDSTimer)
+
+  );; let
+
+;;; pckPDSFlow.il ends here
+
+

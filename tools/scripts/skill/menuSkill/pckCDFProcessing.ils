@@ -1,0 +1,450 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Filename: pckCDFProcessing.il             Project: TCC
+;; 
+;;  Version: $Id: pckCDFProcessing.ils.rca 1.1 Fri Dec 10 15:47:46 2010 pvrott Experimental $
+;; 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; Copyright Intel Corporation 2006
+;;
+;; Author: Pavel Rott
+;; Keywords: TCC, CDF, Processing
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Functional Description:
+;;
+;; This file collects subroutines to process CDF files, spit out XML-like format, etc.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;    (load "tcc_collateral/core/skill/pckCDFProcessing.ils")
+;;
+;; setShellEnvVar( "TCC_DEVELOPMENT_ENV=YES")
+
+(defun pckCDFParseToXML (fi fo @optional publishReason) (list fi fo) )
+(defun pckReadMD (filename) (list filename) )
+
+(let ()
+  (importSkillVar stdout )
+  (importSkillVar AUX_LIB)
+  (importSkillVar MOS_LIB)
+  (importSkillVar TCCUI_DB_TARGET)
+
+  (defun _cdfToXMLParser (fi fo @optional publishReason) 
+;   (pckErrsetFormat
+     (let (cdfId outport md cn lb paramUIrule retval )
+
+       (setq retval nil)
+       (setq md (_readMetaDataSection fi fo ))
+       (setq cn (car md))
+       (setq paramUIrule (cadr md))
+       (setq lb (car (last md)))
+       ;;
+       ;; Load CDF file
+       ;;
+;      (unless (ddGetObj lb cn)
+;          (pckErr 999 (sprintf nil "Cell %s.%s does not exist." lb cn))
+;           (pckError "cdfToXMLParser" (sprintf nil "******** Cell %s/%s does not exist. ********" lb cn))
+;           )
+;      (load fi)
+       ;;
+;      (unless (setq cdfId (cdfGetBaseCellCDF (ddGetObj lb cn) ) )
+;          (pckErr 999 (sprintf nil "CDF was not created for %s.%s\n" lb cn))
+;           (pckError "cdfToXMLParser" (sprintf nil "******** CDF was not created for %s/%s. ********" lb cn))
+;           )
+
+       (if (ddGetObj lb cn) then
+           (load fi)
+           (if (setq cdfId (cdfGetBaseCellCDF (ddGetObj lb cn) ) ) then
+               (setq outport (outfile fo "a"))
+               (_cdfOut2XML outport cdfId~>parameters paramUIrule publishReason)
+               (close outport)
+               (setq retval t)
+           else
+               (pckError "cdfToXMLParser" (sprintf nil "******** CDF was not created for %s/%s. ********" lb cn))
+           )
+       else
+           (pckError "cdfToXMLParser" (sprintf nil "******** Cell %s/%s does not exist. ********" lb cn))
+       )
+
+    retval
+    );; let
+
+;    );; pckErrsetFormat
+
+  );;  cdfToXMLParser
+
+  (defun _cdfOut2XML (fo cdfParams paramUIrule publishReason)
+    (let ()
+      ;;(fprintf fo "<TemplateParameters>\n")
+      (foreach param cdfParams
+               (fprintf fo "<StructureTemplateDetail>\n")
+               (foreach attr param~>?
+                        (cond
+                         ((or (equal "name"  (get_pname attr)) (equal "paramType" (get_pname attr)))
+                          (fprintf fo "\t<%s>%s</%s>\n" (get_pname attr) (get param attr) (get_pname attr))
+                          )
+                         ((equal "prompt" (get_pname attr))
+                          (fprintf fo "\t<%s><![CDATA[%s]]></%s>\n" (get_pname attr) (get param attr) (get_pname attr))
+                          )
+                         ((equal "defValue" (get_pname attr))
+                          (cond 
+                           ((stringp (get param attr))
+                            (fprintf fo "\t<defValue>%s</defValue>\n" (get param attr)))
+                           ((floatp (get param attr))
+                            (fprintf fo "\t<defValue>%.3f</defValue>\n" (get param attr)))
+                           ((integerp (get param attr))
+                            (fprintf fo "\t<defValue>%d</defValue>\n" (get param attr)))
+                           (t
+                            (fprintf fo "\t<defValue>%L</defValue>\n" (get param attr)))
+                            );; cond defValue printout
+                          )
+                         ((or (equal "display" (get_pname attr)) (equal "editable" (get_pname attr)))
+                          ;;
+                          ;; This is a bit tricky.  If these are not set explicitly, they will be
+                          ;; boolean nil (but it means they are dusplayable/editable.
+                          ;; Explicit setting means that parameters are set to "t"/"nil" strings
+                          ;; and first if action takes care of it. 
+                          ;; And we set these parameters to "t" if they return boolean nil.
+                          ;; Twisted.
+                          (if (get param attr);; not nil
+                              (fprintf fo "\t<%s>%s</%s>\n" (get_pname attr) (get param attr) (get_pname attr))
+                            (fprintf fo "\t<%s>t</%s>\n" (get_pname attr) (get_pname attr)))
+                          )
+                         ((equal "storeDefault" (get_pname attr))
+                          (fprintf fo "\t<storeDefault>t</storeDefault>\n")
+                          )
+                         ((equal "callback" (get_pname attr))
+                          ;;(fprintf stdout "For %s callback value: %L\n" param~>name (get param attr) )
+                          (if (get param attr);; not nil
+                              (fprintf fo "\t<%s>t</%s>\n" (get_pname attr)(get_pname attr))
+                            (fprintf fo "\t<%s>nil</%s>\n" (get_pname attr) (get_pname attr)))
+                          )
+                         (t
+                          ;; do nothing
+                          )
+                         );; cond
+                        );; foreach attribute
+               ;; process paramUIrule
+               (if (stringp (get paramUIrule param~>name))
+                   (fprintf fo "\t<rule>%s</rule>\n" (get paramUIrule param~>name))
+                   (fprintf fo "\t<rule></rule>\n") )
+               (if (equal param~>name (upperCase param~>name))
+                   (fprintf fo "\t<catalog>t</catalog>\n")
+                   (fprintf fo "\t<catalog>nil</catalog>\n") )
+               (fprintf fo "</StructureTemplateDetail>\n")
+               
+               ) ;; foreach parameter
+
+
+      (if publishReason != nil then
+
+          pckInfo( "pckEvalCDFtoXML" sprintf( nil "Publish Reason: %s" publishReason))
+
+          (fprintf fo "<StructureTemplateDetail>\n")
+          (fprintf fo "\t<callback>nil</callback>\n")
+          (fprintf fo "\t<defValue>%s</defValue>\n" publishReason)
+          (fprintf fo "\t<display>nil</display>\n")
+          (fprintf fo "\t<editable>nil</editable>\n")
+          (fprintf fo "\t<name>PublishReason</name>\n")
+          (fprintf fo "\t<paramType>string</paramType>\n")
+          (fprintf fo "\t<prompt><![CDATA[Publish Reason]]></prompt>\n")
+          (fprintf fo "\t<rule></rule>\n")
+          (fprintf fo "\t<catalog>nil</catalog>\n")
+          (fprintf fo "</StructureTemplateDetail>\n")
+
+      )
+      (fprintf fo "</Template>\n")
+      ;;(fprintf fo "</TemplateParameters>\n")
+      
+      );; let
+    );; cdfOut2XML
+
+
+;; *** NEW *** Publish tccdev to Asterix update:
+;; This new function now obtains library and cell name earlier than before:
+
+  (defun _getLibAndCell (fn )
+    (let (inport nl (mdStart 0) (mdEnd 0) cellname LIBRARY)
+      (setq inport (infile fn ))
+      (when inport
+        (while (gets nl inport)
+          ;;
+          ;; capture MD
+          ;;
+          (cond
+           ((rexMatchp "BEGIN_TEMPLATE_METADATA" nl)
+            ;;(fprintf stdout "Found start of MD section!\n")
+            (setq mdStart 1)
+            );;
+           ((rexMatchp "END_TEMPLATE_METADATA" nl)
+            (setq mdEnd 1) 
+            );;
+           (t 
+            );;
+           );; cond
+          (if (and (equal mdStart 1) (equal mdEnd 0) )
+              (progn ;; MetaData portion of CDF file
+                (unless (rexMatchp "TEMPLATE_METADATA" nl)
+                  (if (rexMatchp "CELLNAME" nl)
+                   (setq cellname (_getCellNameFromCDF nl)))
+                  )
+                )
+            );; save MetaData
+          (if (equal mdEnd 1)
+              (progn ;; CDF information
+                (when (or (rexMatchp "setq[ \t]+LIBRARY" nl)
+                          (rexMatchp "LIBRARY[ \t]+=" nl))
+                  (setq LIBRARY (evalstring nl))
+                  )
+                );; progn
+            );; looking for "rules"
+
+          );; while we read file
+        )
+      (close inport)
+
+      pckInfo("getLibAndCell" sprintf( nil "LIBRARY: %s   CELLNAME: %s" LIBRARY cellname))
+
+      list(cellname LIBRARY)
+      );; let
+
+    );; defun _getLibAndCell
+
+  (defun _readMetaDataSection (fn fo)
+    (let (inport outport nl tl md (mdStart 0) (mdEnd 0) (MetaData "") paramUIrule param cellname LIBRARY)
+      (setq paramUIrule (ncons nil))
+;; *** NEW *** Publish tccdev to Asterix update:
+      (setq md (_getLibAndCell fn ))
+
+      (setq inport (infile fn ))
+      (when inport
+        (while (gets nl inport)
+          ;;(print nl)
+          ;;(fprintf stdout "%s\n" nl)
+          ;;
+          ;; capture MD
+          ;;
+          (cond
+           ((rexMatchp "BEGIN_TEMPLATE_METADATA" nl)
+            ;;(fprintf stdout "Found start of MD section!\n")
+            (setq mdStart 1)
+            );;
+           ((rexMatchp "END_TEMPLATE_METADATA" nl)
+            (setq mdEnd 1) 
+            );;
+           (t 
+            ;;(fprintf stdout "%d %s" (strcmp nl "/*BEGIN_TEMPLATE_METADATA\n") nl )
+            );;
+           );; cond
+          (if (and (equal mdStart 1) (equal mdEnd 0) )
+              (progn ;; MetaData portion of CDF file
+                (unless (rexMatchp "TEMPLATE_METADATA" nl)
+                  (cond
+
+                   ((rexMatchp "CADENCELIBRARY" nl)
+                    (setq tl (_fixLibName nl md))
+                    );; fixing library name
+
+                   ((rexMatchp "CADENCEDATABASE" nl)
+                    (setq tl (_fixUIDatabaseName nl))
+                    );; fixing DB name
+                   ((rexMatchp "TEMPLATENAME" nl)
+                    ;; fixing template name if workign in a sub-project
+                    (if (getShellEnvVar "TCC_PROJECT")
+                        (setq tl (_fixTemplateName nl (getShellEnvVar "TCC_PROJECT")))
+                        (setq tl nl)
+                        )
+                    )
+;; *** NEW *** Publish tccdev to Asterix update:
+                   ((rexMatchp "CATEGORY" nl)
+                    (setq tl (_fixCategory nl))
+                    );; fixing category
+
+                   (t
+                    (setq tl nl)
+                    );;
+                   );; cond
+                  (setq MetaData (strcat MetaData tl))
+                  (if (rexMatchp "CELLNAME" nl)
+                   (setq cellname (_getCellNameFromCDF nl)))
+                  )
+                )
+            );; save MetaData
+          (if (equal mdEnd 1)
+              (progn ;; CDF information
+                (when (rexMatchp "?name" nl)
+                  (setq param (_extractMatchValue nl "?name") )
+                  )
+                (when (rexMatchp "?paramUIRule" nl )
+                  ;;(fprintf stdout "--D-- UI rule found at line: %s for parameter %s" nl param)
+                  (putprop  paramUIrule (_extractUIRule nl ) param)
+                  )
+                );;
+            );; looking for "rules"
+
+          );; while we read file
+
+        ) ;; file opened OK
+
+      (close inport)
+
+;; *** NEW *** Publish tccdev to Asterix update:
+      (setq LIBRARY (cadr md))  
+
+      (setq outport (outfile fo "w"))
+    
+      (fprintf outport "<?xml version=\"1.0\"?>\n")
+      (fprintf outport "<Template>\n")
+      (fprintf outport MetaData )
+      (close outport)
+      
+
+      ;;(fprintf stdout "--D--  readMetaDataSection.\n")
+      ;;(fprintf stdout "--D--  metaData:\n%s\n" MetaData )
+      ;;(fprintf stdout "--D-- paramUIRules:\n")
+      ;;(fprintf stdout "--D-- %L\n" paramUIrule->??)
+
+      list(cellname paramUIrule LIBRARY)
+      );; let
+
+    );; defun _readMetaDataSection
+
+
+  (defun _fixLibName (inline md)
+    (let (outlib)
+
+;; *** NEW *** Publish tccdev to Asterix update:
+      (if (not (equal (getShellEnvVar "TCC_DEVELOPMENT_ENV") "YES")) then
+
+      (setq outlib (car (parseString (cadr (parseString inline ">" ) ) "<") ) )
+      (if (getShellEnvVar "TCC_PROJECT")
+          (progn
+            (case (getShellEnvVar "TCC_PROJECT")
+              ("mps1"
+               (setq outlib
+                  (strcat
+                   "\t<CADENCELIBRARY>" "s1" MOS_LIB 
+                   "</CADENCELIBRARY>\n"))
+               )
+              ("mps2"
+               (setq outlib
+                  (strcat
+                   "\t<CADENCELIBRARY>" "s2" MOS_LIB
+                   "</CADENCELIBRARY>\n"))
+               )
+		("x9b05" 
+               (setq outlib
+                  (strcat
+                   "\t<CADENCELIBRARY>" "b05" MOS_LIB
+                   "</CADENCELIBRARY>\n"))
+               )
+              (t
+               (setq outlib (strcat "\t<CADENCELIBRARY>" MOS_LIB "</CADENCELIBRARY>\n")))
+                )
+            )
+          (progn
+            (if (boundp 'MOS_LIB)
+                (setq outlib (strcat "\t<CADENCELIBRARY>" MOS_LIB "</CADENCELIBRARY>\n"))
+                (setq outlib "\t<CADENCELIBRARY>pcells1266_tccqa_lay</CADENCELIBRARY>\n")
+                )
+            )
+          )
+      else
+          ;; If publishing within development library, get the correct template library name from cdf file
+
+          (setq outlib (strcat "\t<CADENCELIBRARY>" (cadr md) "</CADENCELIBRARY>\n"))
+      )
+      outlib
+      );; let
+    )
+  (defun _fixTemplateName (inline suffix )
+    (let (tn)
+      (setq tn (car (parseString (cadr (parseString inline ">" ) ) "<") ) )
+      (setq tn (strcat "\t<TEMPLATENAME>" tn "_" (upperCase suffix) "</TEMPLATENAME>\n"))
+      tn
+      );; let
+    )
+  (defun _fixCategory (inline )
+    (let (outcat)
+      (if (equal (getShellEnvVar "TCC_DEVELOPMENT_ENV") "YES") then
+          (setq outcat "\t<CATEGORY>TEST</CATEGORY>\n")
+      else
+          (setq outcat inline)
+      )
+      outcat
+      );; let
+    )
+  (defun _fixUIDatabaseName (inline)
+    (let (outdb outlib)
+      (setq outdb (car (parseString (cadr (parseString inline ">" ) ) "<") ) )
+      ;;(fprintf stdout "--D-- %L\n" outdb)
+      (if (and (boundp 'TCCUI_DB_TARGET) TCCUI_DB_TARGET)
+          (progn
+            (fprintf stdout "--D-- Setting output UI datbase to %s\n" TCCUI_DB_TARGET)
+            (setq outlib (strcat "\t<CADENCEDATABASE>" TCCUI_DB_TARGET "</CADENCEDATABASE>\n")))
+        (progn 
+          (setq outlib (strcat "\t<CADENCEDATABASE>" outdb "</CADENCEDATABASE>\n")))
+        )
+      outlib
+      );; let
+    )
+
+  (defun _getCellNameFromCDF (inline)
+    (let ()
+      (car (parseString (cadr (parseString inline ">" ) ) "<") )
+      )
+    );; getCellNameFromCDF
+
+  (defun _extractMatchValue (inline match )
+    (let (outline)
+      ;;
+      ;; first we parse String and find sublist that includes the match
+      ;; then we take the first element after the match and strip quotes off
+      ;;
+      (setq outline (car (parseString (cadr (member match (parseString inline))) "\"" ) ) )
+      ;;(fprintf stdout "--D-- extractMatchValue: input: %s match:%s outline %s\n" inline match outline)
+      outline
+      )
+    )
+
+  (defun _extractUIRule (inline)
+    (let (outline (start 0))
+      (setq outline (tconc nil ""))
+      (foreach word (parseString inline)
+               (when (or (rexMatchp "^?" word) (rexMatchp "\\*/" word))
+                 ;;(fprintf stdout "--D-- Found ?: %s\n" word)
+                 (setq start 0 ))
+               (unless (equal start 0)
+                 ;;(fprintf stdout "--D-- Adding word %s to the list %L\n" word outline)
+                 (tconc outline word)
+                 )
+               (when (rexMatchp "?paramUIRule" word)
+                 ;;(fprintf stdout "--D-- Found  paramUIRules: %s\n" word )
+                 (setq start 1))
+               );; process the line
+      (setq outline (cdr (car outline))) ;; cdr is necessary to get rid of initial "" element
+      ;;(fprintf stdout "--D-- extractUIRule: input %s outline: %s\n" inline (buildString outline) )
+      ;;(buildString outline)
+      (setq outline (_removeQuotes (buildString outline)))
+      );; let
+               
+    );; extractUIRule
+  (defun _removeQuotes (str)
+    (let ( (len (strlen str)) )
+      (when (equal (get_pname (getchar str 1)) "\"")
+        (setq str (substring str 2 len))
+        (setq len (strlen str)))
+      (when (equal (get_pname (getchar str len))  "\"")
+        (setq str (substring str 1 len-1)))
+      str
+      )
+    )
+
+
+  (setq pckReadMD _readMetaDataSection)
+  (setq pckCDFParseToXML _cdfToXMLParser)
+  );; final  let
+;;; pckCDFProcessing.ils ends here

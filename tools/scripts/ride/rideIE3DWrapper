@@ -1,0 +1,2 @@
+#!/bin/sh
+start_app ie3dSeqSim.sh $1

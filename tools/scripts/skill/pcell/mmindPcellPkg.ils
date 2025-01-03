@@ -1,0 +1,295 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Intel Top Secret                                                           ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Copyright (C) 2020, Intel Corporation.  All rights reserved.               ;
+;                                                                            ;
+; This is the property of Intel Corporation and may only be utilized         ;
+; pursuant to a written Restricted Use Nondisclosure Agreement               ;
+; with Intel Corporation.  It may not be used, reproduced, or                ;
+; disclosed to others except in accordance with the terms and                ;
+; conditions of such agreement.                                              ;
+;                                                                            ;
+; All products, processes, computer systems, dates, and figures              ;
+; specified are preliminary based on current expectations, and are           ;
+; subject to change without notice.                                          ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Author:
+;   Mauricio Marulanda
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+procedure(mmInitIndPCell(cdfgData)
+  apply(get(mmIndPCellCore() 'fixIndParamsCB) list("all" cdfgData)))
+  
+procedure(mmIndPCellCore()
+let( ( buildLeads buildBrackets buildInnerOuterHBars buildTheCrossOvers finalTouch setParamDisplayCB fixIndParamsCB readPropBag (pi 3.1416) )
+
+procedure(pp(val) warn(sprintf(nil "%L" val)))
+
+;; LAYOUT BUILD
+  procedure(buildLeads(cv topLayer w tl ts)
+  let( (points shapes)
+    points = tconc(points rodAddToX(0:0 ts/2+w/2))  points = tconc(points rodAddToY(cadr(points) tl)) 
+    shapes = drawShape(cv topLayer car(points) w t) shapes   ))
+  procedure(buildBrackets(cv topLayer shape n w s dx dy tl ts octSym pB) 
+  let( (p1 effDy effDx points shapes side effS) ; build in mid points
+    effS = geometry(w s dx dy octSym pB->grid) side=car(effS) effS=cadr(effS) ts
+    p1 = dx/2-w/2-side:tl+w/2  effDy = dy-w  effDx = side
+    points = getCShapePoints(p1 effDy effDx w/2)  shapes = lconc(shapes drawShape(cv topLayer points w t))
+    for(nn 1 n-1  
+      effDy = effDy - 2*(w+s)  p1 = rodAddPoints(p1 -effS:w+s) ;p1 shifts by glitch of octagons
+      when(shape == "oct" effDx = dx/2-w/2-nn*(w+s)-xCoord(p1) ) 
+      points = getCShapePoints(p1 effDy effDx w/2)  shapes = lconc(shapes drawShape(cv topLayer points w t))  ); for
+  car(shapes) ))
+  procedure(buildInnerOuterHBars(cv topLayer viaLayer botLayer shape n w s dx dy tl ts octSym pB ct) 
+  let( (points shapes side yP effS) ; build in mid points
+    effS = geometry(w s dx dy octSym pB->grid) side=car(effS) effS=cadr(effS)    points = tconc(points ts/2:tl+w/2)  points = tconc(points dx/2-w/2-side:tl+w/2)  
+    shapes = lconc(shapes drawShape(cv topLayer car(points) w t)) ; create the outer one
+    yP = if(n>1 && evenp(n) tl+w/2+(n-1)*(w+s) dy+tl-(w/2+(n-1)*(w+s)) )
+    points = tconc(nil 0:yP) points = tconc(points if(shape=="rec" dx/2-(n-1)*(w+s):yP   dx/2-w/2-side-(n-1)*effS:yP) )
+    shapes = lconc(shapes drawShape(cv topLayer car(points) w t))    ; create the inner most
+    if(ct then buildCT(cv topLayer viaLayer botLayer w caar(points) pB)
+    else  rodCreateRect(?cvId cv ?layer list(topLayer pB->resIdPurpose) ?origin rodAddPoints(caar(points) -pB->grid/2:-w/2) ?width pB->grid ?length w) )
+  car(shapes)  ))
+  procedure(buildTheCrossOvers(cv topLayer viaLayer botLayer n w s dx dy tl ts octSym pB)
+  let( (effS side shapes box p1 p2)
+    effS = geometry(w s dx dy octSym pB->grid) side=car(effS) effS=cadr(effS) ts
+    for(nn 1 n-1
+      if(oddp(nn) then  box = buildCrossOver(cv list(topLayer botLayer) viaLayer w s 0:dy+tl-(2*w+s)-(nn-1)*(w+s) t pB)  shapes = lconc(shapes car(box))  box=cadr(box)
+	p1 = rightEdge(box):topEdge(box)-w/2  p2 = dx/2-w/2-side-(nn-1)*effS:topEdge(box)-w/2  shapes = lconc(shapes drawShape(cv topLayer list(p1 p2) w t))
+	p2 = rodAddToX(p2 -effS)                                                               shapes = lconc(shapes drawShape(cv topLayer dbTransformPointList(list(p1 p2) list(0:-w-s "R0" 1)) w t))
+      else   box = buildCrossOver(cv list(topLayer botLayer) viaLayer w s 0:tl+w+s+(nn-2)*(w+s) t pB t)         shapes = lconc(shapes car(box))  box=cadr(box)
+        p1 = rightEdge(box):bottomEdge(box)+w/2  p2 = dx/2-w/2-side-(nn-1)*effS:bottomEdge(box)+w/2  shapes = lconc(shapes drawShape(cv topLayer list(p1 p2) w t))
+	p2 = rodAddToX(p2 -effS)                                                                    shapes = lconc(shapes drawShape(cv topLayer dbTransformPointList(list(p1 p2) list(0:w+s "R0" 1)) w t))  );if
+    ); for
+  car(shapes)  ))
+  procedure(buildCrossOver(cv layers via w s orig shape45 pB @optional (flip nil)) ;layer1/w and layer2/calculated
+  let( (ext touch sizeVia overlapViaTL overlapViaBL sVia sTL sBL wBL overlapBL shapes rows effS offsetToC grid box points)
+    sizeVia = pB->sizeVia overlapViaTL = pB->overlapViaTopLayer sBL = pB->spaceBotLayer sVia = pB->spaceVia overlapViaBL = 2.5*pB->overlapViaBotLayer sTL = pB->spaceTopLayer wBL = pB->sizeBotLayer grid=pB->grid w = max(w car(pB->sizeTopLayer));probBag    
+    ; calculate geometries
+    sBL = max(sBL sVia-overlapViaBL*2)+grid wBL = max(car(wBL) cadr(sizeVia)+overlapViaBL*2)+grid
+    when(wBL > cadr(sizeVia)+overlapViaBL*2 overlapViaBL = (wBL - cadr(sizeVia) )/2) overlapBL = max(0 overlapViaTL-overlapViaBL) shape45
+    touch = aelEval(2*w/2*tan(pi/8)+sTL*cos(pi/4) ?grid grid) + 2*grid   ext = car(sizeVia)+(overlapBL+overlapViaBL)*2+touch ;minimum size for cross over given by square + 2*ext  
+    orig = rodAddToX(orig (2*ext+w+s)/-2); shift origin to have it center
+    ; create the top and bottom layer paths
+    points = ncons(rodAddToY(orig w/2))  points = cons(rodAddToX(car(points) ext) points) points = cons(rodAddPoints(car(points) w+s:w+s) points) points = cons(rodAddToX(car(points) ext) points)
+    shapes = lconc(shapes drawShape(cv car(layers) points w))         ; can be 45
+    effS = aelEval((sBL+wBL)*tan(pi/8) ?grid grid)    rows = 1+floor((w-2*overlapBL-wBL)/(wBL+sBL)) offsetToC=max(overlapBL aelEval((w-rows*wBL-(rows-1)*sBL)/2 ?grid grid))
+    for(cc 0 rows-1 ; ; create the bot layer with vias and this can be optimized for square instead of 45
+      points = ncons(rodAddToY(orig w+s+wBL/2+cc*(sBL+wBL)+offsetToC))  points = cons(rodAddToX(car(points) ext+cc*effS) points) points = cons(rodAddPoints(car(points) w+s:-w-s) points) points = cons(rodAddToX(car(points) ext-cc*effS) points)    
+      shapes = lconc(shapes drawShape(cv cadr(layers) points wBL) ) 
+      shapes = tconc(shapes rodCreateRect(?cvId cv ?layer via ?origin  rodAddPoints(car(last(points)) overlapBL+overlapViaBL:-cadr(sizeVia)/2) ?width car(sizeVia) ?length cadr(sizeVia))~>dbId) 
+      shapes = tconc(shapes rodCreateRect(?cvId cv ?layer via ?origin  rodAddPoints(car(points) -overlapBL-overlapViaBL-car(sizeVia):-cadr(sizeVia)/2) ?width car(sizeVia) ?length cadr(sizeVia))~>dbId ) );for
+    ; place rects 
+    box = list(rodAddToY(orig w+s) rodAddPoints(orig ext-touch:w+s+w))  shapes = tconc(shapes dbCreateRect(cv car(layers) box) ) ;0:1
+    box = list(rodAddToX(orig ext+w+s+touch) rodAddPoints(orig 2*ext+w+s:w)) shapes = tconc(shapes dbCreateRect(cv car(layers) box) );1:0  
+    ; when flip Mirror to X and bring back by 2*OverallHeight
+    when(flip foreach(ss car(shapes) dbMoveFig(ss cv list(0:2*cadr(orig)+2*w+s "MX" 1)) ) )      
+  list(car(shapes)  list(orig rodAddPoints(orig 2*ext+w+s:2*w+s)))  ));proc  return the shapes and the bBox of the overall crossover
+  procedure(finalTouch(cv topLayer indType n w s dx dy tl ts oS shapes fill pB)
+  let( (pr label)
+    ; add the pins, merge, and chkBoundary
+    rodCreateRect(?cvId cv ?layer list(topLayer "pin") ?termName "p" ?pin t ?pinLabel t ?pinLabelHeight 0.6*w ?origin -ts/2-w:0 ?width w ?length w)  dbCreateLabel(cv topLayer -ts/2-w/2:0.1*car(pB->sizeTopLayer) "p" "lowerCenter" "R0" "stick" 0.1*car(pB->sizeTopLayer))
+    rodCreateRect(?cvId cv ?layer list(topLayer "pin") ?termName "n" ?pin t ?pinLabel t ?pinLabelHeight 0.6*w ?origin   ts/2:0  ?width w ?length w)  dbCreateLabel(cv topLayer  ts/2+w/2:0.1*car(pB->sizeTopLayer) "n" "lowerCenter" "R0" "stick" 0.1*car(pB->sizeTopLayer))     
+    mergeShapes(cv shapes topLayer) 
+    pr = dbCreatePRBoundary(cv list(-dx/2:0 -dx/2:tl+dy dx/2:tl+dy dx/2:0))  dbCreateRect(cv pB->densityLayer pr~>bBox)  createBlockages(cv topLayer pB->blockages pr~>bBox)
+    ; fill symmetrically and put the dimensions as label    
+    when(fill fillInd(cv topLayer pr~>bBox 1.1*car(pB->sizeTopLayer):1.1*car(pB->sizeTopLayer) pB->spaceTopLayer+pB->grid:pB->spaceTopLayer+pB->grid pB->grid))
+    oS = (if indType == "oct" sprintf(nil "octSym=%.1f" oS) "") label = sprintf(nil "n=%d\nw=%.3f\ns=%.3f\ndx=%.3f\ndy=%.3f\ntl=%.3f\nts=%.3f\n%s" n w s dx dy tl ts oS) label
+;    dbCreateLabel(cv "text" 0:(dy+tl)/2 label "centerCenter" "R0" "stick" 0.03*min(dx dy))   
+  t  ));let;proc
+;;; CDF Callbacks
+  procedure(fixIndParamsCB(whoCalled cdfId @optional (recursive nil) )
+  let( (n w s dx dy tl ts oS indType cdfP stop result minV maxV sTL wTL extp sizeVia ovlBL ovlViaBL ovlViaTL tn grid maxD pB test denWMax side)
+    ; convert to number and to microns
+    n  = aelEval(cdfId~>n~>value ?default cdfParseFloatString(cdfId~>n~>defValue)) n=pcFix(n)
+    s  = aelEval(cdfId~>s~>value ?default cdfParseFloatString(cdfId~>s~>defValue))*1e6 
+    w  = aelEval(cdfId~>w~>value ?default cdfParseFloatString(cdfId~>w~>defValue))*1e6 
+    dx = aelEval(cdfId~>dx~>value ?default cdfParseFloatString(cdfId~>dx~>defValue))*1e6 
+    dy = aelEval(cdfId~>dy~>value ?default cdfParseFloatString(cdfId~>dy~>defValue))*1e6 
+    tl = aelEval(cdfId~>tl~>value ?default cdfParseFloatString(cdfId~>tl~>defValue))*1e6 
+    ts = aelEval(cdfId~>ts~>value ?default cdfParseFloatString(cdfId~>ts~>defValue))*1e6       
+    oS = aelEval(cdfId~>octSym~>value ?default cdfParseFloatString(cdfId~>octSym~>defValue))
+    indType = cdfId~>indType~>value
+    ; minimum requirements
+    pB = readPropBag(cdfId~>id) grid = pB->grid
+    sizeVia = pB->sizeVia ovlViaBL = 2.5*pB->overlapViaBotLayer ovlViaTL = pB->overlapViaTopLayer sTL = pB->spaceTopLayer wTL = pB->sizeTopLayer maxD = pB->maxDensity;probBag
+    ovlBL = max(0 ovlViaTL-ovlViaBL) extp = car(sizeVia)+(ovlBL+ovlViaBL)*2  tn = tan(pi/8)  denWMax = 25 ;cadr(wTL) ;geometry independent ; cadr(wTL) could be use after 78 testing
+    stop = nil
+    ; find who call and correct
+      case(whoCalled
+      ("n"  minV = 1 
+            maxV = floor(if(indType == "rec" (dx-2*extp+s-w*tn-w)/(2*(w+1))
+                                        min( (dx*2**0.5/2 + dx - extp*2**0.5 - 2*extp - min(dx dy)*oS + s*2**0.5*tn - s*2**0.5/2 + 2*s*tn - s + 2**0.5*tn*w/2 - 2**0.5*w + tn*w - 2*w)/(tn*(s*2**0.5 + 2*s + 2**0.5*w + 2*w))  
+                                             (2**0.5*dy/2 + 2**0.5*s*tn - 2**0.5*sTL/2 + 2**0.5*tn*w - 2**0.5*w/2 + dy - min(dx dy)*oS + 2*s*tn - sTL + 2*tn*w - w)/(tn*(2**0.5*s + 2**0.5*w + 2*s + 2*w)) ) ) )
+            when( (test = w-car(wTL)-(denWMax-10)/denWMax) > 0  maxV = min(maxV floor(-log(test/34)/(1-maxD))) ) ; density related
+            result = aelEval(n ?minimum minV ?maximum max(minV maxV)) n=result )      
+      ("w"  minV = car(wTL)
+            maxV = min( cadr(wTL) if(indType == "rec" (dx - 2*extp - 2*n + s)/(2*n + tn + 1) 
+	                                              (2**0.5*dx - 2*2**0.5*extp - 2*2**0.5*n*s*tn + 2*2**0.5*s*tn - 2**0.5*s + 2*dx - 4*extp - 2*min(dx dy)*oS - 4*n*s*tn + 4*s*tn - 2*s)/(2*2**0.5*n*tn - 2**0.5*tn + 2*2**0.5 + 4*n*tn - 2*tn + 4) ) )
+            maxV = min(maxV (car(wTL) + 34*exp(-n*(1-maxD)) + (denWMax-10)/denWMax*s)) ; density related
+	    result = aelEval(w ?minimum minV ?maximum max(minV maxV))   w=result )
+      ("s"  minV = if(indType == "rec" sTL sTL)
+            maxV = if(indType == "rec" (-dx + 2*extp + 2*n*w + 2*n + tn*w + w)
+                                       (2**0.5*dx - 2*2**0.5*extp - 2*2**0.5*n*tn*w + 2**0.5*tn*w - 2*2**0.5*w + 2*dx - 4*extp - 2*min(dx dy)*oS - 4*n*tn*w + 2*tn*w - 4*w)/(2*2**0.5*n*tn - 2*2**0.5*tn + 2**0.5 + 4*n*tn - 4*tn + 2) )
+            if(n==1 then maxV=minV 
+	    else  minV = max(minV (w-car(wTL)-34*exp(-n*(1-maxD)))*denWMax/(denWMax-10) ) ) ; density related
+            result = aelEval(s ?minimum minV ?maximum max(minV maxV))   s=result )
+      ("dx" minV = if(indType == "rec" (2*extp + 2*n*w + 2*n*s - s + tn*w + w)
+                                       w+(2*2**0.5*extp + 2*2**0.5*n*s*tn + 2*2**0.5*n*tn*w - 2*2**0.5*s*tn + 2**0.5*s - 2**0.5*tn*w + 2*2**0.5*w + 4*extp + 2*min(4000 dy)*oS + 4*n*s*tn + 4*n*tn*w - 4*s*tn + 2*s - 2*tn*w + 4*w)/(2**0.5 + 2) )
+            maxV = 700.0
+            result = aelEval(dx ?minimum minV ?maximum maxV) dx=result )
+      ("dy" minV = if(indType == "rec" (2*n*s + 2*n*w - 2*s + 2*sTL)
+                                       (2*2**0.5*n*s*tn + 2*2**0.5*n*tn*w - 2*2**0.5*s*tn + 2**0.5*2*sTL - 2*2**0.5*tn*w + 2**0.5*w + 2*min(dx 4000)*oS + 4*n*s*tn + 4*n*tn*w - 4*s*tn + 2*2*sTL - 4*tn*w + 2*w)/(2**0.5 + 2) )
+	    maxV = 700.0
+            result = aelEval(dy ?minimum minV ?maximum maxV) dy=result )
+      ("octSym" minV = max(0.1 (-(s+w)*(n-1)*tn + (w+s)*(n-1) + 2*sTL)/(min(dx dy)/(2+2**0.5)) )
+                maxV = min( (2**0.5*dx/2 - 2**0.5*extp - 2**0.5*n*s*tn - 2**0.5*n*tn*w + 2**0.5*s*tn - 2**0.5*s/2 + 2**0.5*tn*w/2 - 2**0.5*w + dx - 2*extp - 2*n*s*tn - 2*n*tn*w + 2*s*tn - s + tn*w - 2*w)/min(dx dy)
+                          (2**0.5*dy/2 - 2**0.5*n*s*tn - 2**0.5*n*tn*w + 2**0.5*s*tn - 2**0.5*sTL/2 + 2**0.5*tn*w - 2**0.5*w/2 + dy - 2*n*s*tn - 2*n*tn*w + 2*s*tn - sTL + 2*tn*w - w)/min(dx dy) 
+			  (dx/2-w-ts/2)*(2**0.5+2)/min(dx dy) )
+            minV = ceiling(minV*10)/10.0  maxV = floor(maxV*10)/10.0
+	    result = aelEval(oS ?minimum minV ?maximum maxV) oS=result )
+      ("tl" minV = car(wTL) maxV = 10*car(wTL)
+            result = aelEval(tl ?minimum minV ?maximum maxV) tl=result )
+      ("ts" minV = sTL
+            if(indType=="rec" then maxV = dx-2*w 
+	    else side=oS*min(dx dy)/(2**0.5+2) + w*tn  maxV = max(minV dx-2*w-2*side) )
+            result = aelEval(ts ?minimum minV ?maximum maxV)	ts=result )
+      (t stop=t)      ); case
+	          
+    ; replace the parameter
+    unless(stop
+      ; convert to string and attach units
+      cdfP = cdfFindParamByName(cdfId whoCalled)  
+      if(whoCalled=="n" then           result = sprintf(nil "%d" result) putprop(cdfP result "value")  when(n==1 cdfId~>s~>value = sprintf(nil "%fu" sTL))
+      else if(whoCalled=="octSym" then result = sprintf(nil "%.1f" result) putprop(cdfP result "value")
+      else                             result = sprintf(nil strcat("%." sprintf(nil "%d" strlen(numToStr(grid))-2) "f") result)  putprop(cdfP strcat(result "u") "value")    )));unless if 
+    ; re-run the callbacks except for the "whoCalled" to make sure new ranges work out
+    unless(recursive
+      foreach(cb list("dx" "dy" "n" "w" "s" "ts" "octSym")  when(cb!=whoCalled fixIndParamsCB(cb cdfId t)) ) ) 
+  t))
+  procedure(setParamDisplayCB(whoCalled cdfId)
+  case(whoCalled
+    ("s" when(cdfId~>n~>value != "1" t ) )
+    ("octSym" when(cdfId~>indType~>value == "oct" t) ) 
+  ));case;proc
+
+;;; GENERIC FNS  
+  procedure( createBlockages(cv topLayer blockages box)
+  let( (points)
+    when(type(blockages) == 'string  blockages = list(blockages))  
+    blockages = cons(topLayer blockages)
+    points = list(car(box) rightEdge(box):bottomEdge(box) cadr(box) leftEdge(box):topEdge(box))
+    foreach(layer blockages dbCreateLayerBlockage(cv layer "fill" points) )
+  t))
+  procedure( buildCT(cv topLayer viaLayer botLayer w orig pB)
+  let( (sizeVia overlapViaBL wBL grid box)
+    sizeVia = pB->sizeVia overlapViaBL = 2.5*pB->overlapViaBotLayer wBL = pB->sizeBotLayer grid=pB->grid ;probBag    
+    wBL = list(max(car(wBL) car(sizeVia)+overlapViaBL*2)+grid max(car(wBL) cadr(sizeVia)+overlapViaBL*2)+grid) ;   
+    rodCreateRect(?cvId cv ?layer viaLayer ?origin rodAddPoints(orig car(sizeVia)/-2:cadr(sizeVia)/-2) ?width car(sizeVia) ?length cadr(sizeVia))
+    box = rodCreateRect(?cvId cv ?layer botLayer ?origin rodAddPoints(orig car(wBL)/-2:cadr(wBL)/-2) ?width car(wBL) ?length cadr(wBL))~>dbId~>bBox
+    rodCreateRect(?cvId cv ?layer list(botLayer "pin") ?termName "ct" ?pin t ?pinLabel t ?pinLabelHeight 0.6*cadr(wBL) ?bBox box)  
+    dbCreateLabel(cv botLayer  car(orig):bottomEdge(box) "ct" "lowerCenter" "R0" "stick" 0.1*car(pB->sizeBotLayer))     
+    rodCreateRect(?cvId cv ?layer list(topLayer pB->resIdPurpose) ?origin rodAddPoints(orig max(car(wBL) car(sizeVia))/-2-pB->grid:-w/2) ?width pB->grid ?length w)
+    rodCreateRect(?cvId cv ?layer list(topLayer pB->resIdPurpose) ?origin rodAddPoints(orig max(car(wBL) car(sizeVia))/2:-w/2) ?width pB->grid ?length w)
+  ))
+  procedure( geometry(w s dx dy octSym grid)
+  let( (side effS)
+    side = aelEval(octSym*min(dx dy)/(2**0.5+2) ?grid grid)  ; side is the x/y components of the octagon side, can be scale with OctSym from 0-1
+    effS = if(zerop(octSym) w+s  aelEval((s+w)*tan(pi/8) ?grid grid) ) ; if OctSym = 0 we have a rectangle and effS = metalPitch W+S
+  list(side effS) )) 
+  procedure( getCShapePoints(sP dy dx @optional (w nil)) ; if dx=0 is a straight line otherwise will try to connect them thru an octagon, if w adds a horizontal notch beg/end
+  let( (points ly trans) ; all units in microns and must be geometrical correct
+    when(dx < 0 trans = t dx = abs(dx)) ; when drawing to the left side
+    when(w points = tconc(points rodAddToX(sP -w)) )
+    points = tconc(points sP)  ly = dy-2*dx
+    points = tconc(points rodAddPoints(cadr(points) dx:dx))
+    points = tconc(points rodAddToY(cadr(points) ly))    
+    points = tconc(points rodAddPoints(cadr(points) -dx:dx))
+    when(w points = tconc(points rodAddToX(cadr(points) -w)) )
+    if(trans then points = dbTransformPointList(car(points) list(2*apply('min mapcar('xCoord car(points))):0 "MY" 1)) 
+    else points = car(points))
+  points))
+  procedure(drawShape(cv topLayer points w @optional (mirror nil))
+  let( (pathDb polyDb lst)
+    when(abs(apply('plus rodSubPoints(car(points) car(last(points))))) > 0; make sure its a realpath distance between them cannot be zero
+      pathDb = dbCreatePath(cv topLayer points w)   polyDb = dbConvertPathToPolygon(pathDb) lst = tconc(lst polyDb)
+      when(mirror lst = tconc(lst dbCopyFig(polyDb cv list(0:0 "MY" 1)) )  )   )
+  car(lst)))
+  procedure(readPropBag(cv @key (text nil))
+  let( (numToStr rc bag (out list(nil)) (outD list(nil)) )   
+    bag = dbOpenBag(ddGetObj(cv~>libName||cv~>lib~>name cv~>cellName||cv~>name) "r")
+    numToStr = lambda( (x) if(text x cdfParseFloatString(x)||x))
+    foreach(bb bag~>dr~>value       rc = mapcar(numToStr parseString(bb~>value ":")) putprop(out  if(length(rc)>1 rc car(rc)) bb~>name))
+    foreach(bb bag~>defaults~>value rc = mapcar(numToStr parseString(bb~>value ":")) putprop(outD if(length(rc)>1 rc car(rc)) bb~>name))
+    putprop(out outD "defaults")
+    dbCloseBag(bag)
+  out))
+  procedure(aelEval(entry @key (minimum nil) (maximum nil) (default nil) (grid nil) (str nil)) ;default is assumed correct && on grid
+  let( (out)
+   when((minimum && grid) minimum = ceiling(minimum/grid)*grid)
+   when((maximum && grid) maximum = floor(maximum/grid)*grid)
+   when(type(entry)=='string entry = cdfParseFloatString(entry))
+   default = (default || minimum || entry)
+   if(numberp(entry) then
+     cond( 
+       ( (minimum && entry < minimum)  out = minimum)
+       ( (maximum && entry > maximum)  out = maximum)
+       (t out = entry)
+       )
+     when(grid out=round(out/grid)*grid)   
+   else out = default
+   )
+   when(str out=sprintf(nil "%L" out))
+  out))
+  procedure(numToStr(numberGiven @optional (precision 6) )
+    if(numberp(precision) then
+      sprintf(precision "%d" fix(precision)) 
+    else 
+      sprintf(precision "%d" fix(6))
+    ) ; if
+    case(type(numberGiven)
+      (fixnum sprintf(numberGiven "%d" numberGiven))
+      (flonum sprintf(numberGiven strcat("%." precision "f") float(numberGiven)))
+      (t numberGiven)
+    ) ; case
+    when(rexMatchp("[0-9]*\\." numberGiven )
+      while(rexMatchp("0$" numberGiven) numberGiven = rexReplace(numberGiven "" 1)) ; while to remove extra "0s"
+      when(rexMatchp("\\.$" numberGiven) numberGiven = rexReplace(numberGiven "" 1) ) ; when to make integer for ".0"
+    ) ; when
+    numberGiven
+  ) ; procedure
+  procedure(listBBox(bBoxGiven)
+  let( (leftBotX leftBotY rightTopX rightTopY)
+    leftBotX = caar(bBoxGiven)
+    leftBotY = cadar(bBoxGiven)
+    rightTopX = caadr(bBoxGiven)
+    rightTopY = cadadr(bBoxGiven)
+    list(list(leftBotX leftBotY) list(leftBotX rightTopY) list(rightTopX rightTopY) list(rightTopX leftBotY) )
+  )) ; procedure
+  procedure(fillInd(cv layer box minWH minSpcXY grid @key (density 0.12)) ;assume its symmetrical around 0
+  let( (pitchX pitchY cols rows orig dBox cBox ovlSpc x y spc effBox)
+    x = car(minWH) y = cadr(minWH) 
+    when(density spc = max( (-density*(x+y) + (density*(density*x**2 - 2*density*x*y + density*y**2 + 4*x*y))**0.5)/(2*density)  -(density*(x + y) + (density*(density*x**2 - 2*density*x*y + density*y**2 + 4*x*y))**0.5)/(2*density))
+                 spc = round(spc/grid)*grid   
+	         minSpcXY = max(car(minSpcXY) spc):max(cadr(minSpcXY) spc) )
+    pitchX = x+car(minSpcXY)  pitchY = y+cadr(minSpcXY)  ovlSpc = rodAddPoints(minSpcXY -grid:-grid)
+    foreach(rev list(1 -1)
+      effBox = if(rev==1 list(car(minSpcXY)/2:0 cadr(box)) list(-car(minSpcXY)/2:0 leftEdge(box):topEdge(box)) )
+      cols = floor( (abs(rightEdge(effBox)-leftEdge(effBox))-x)/pitchX) + 1 
+      rows = floor( (abs(topEdge(effBox)-bottomEdge(effBox))-y)/pitchY) + 1
+      for(rr 0 rows-1 for(cc 0 cols-1 ;; start filling from bottom left using produce overlaps selectively
+        orig = rodAddPoints(car(effBox) rev*cc*pitchX-x*(1-rev)/2:rr*pitchY)  ;(when rev=1 nothing happens(X+ quadrant) when rev=-1 reduce by x and do X- quadrant
+        ; make the decision
+        dBox = list(orig rodAddPoints(orig x:y)) cBox = list(rodSubPoints(car(dBox) ovlSpc) rodAddPoints(cadr(dBox) ovlSpc))
+        unless( dbProduceOverlap(cv cBox 32 list(layer "drawing")) || dbProduceOverlap(cv cBox 32 list(layer "keepGenAway")) 
+          dbCreateRect(cv list(layer "drawing") dBox) ); unless
+    ))); for ;for; foreach
+  t  ))
+  procedure(mergeShapes(cv shapes layer)
+  let( (newShapes)
+    when(shapes = setof(ii shapes ii~>layerName == layer)
+      newShapes = dbLayerOr(cv layer shapes) mapc('dbDeleteObject shapes) newShapes)
+  ))
+
+list(nil 'buildLeads buildLeads 'buildBrackets buildBrackets 'buildInnerOuterHBars buildInnerOuterHBars 'buildTheCrossOvers buildTheCrossOvers 'finalTouch finalTouch  'setParamDisplayCB setParamDisplayCB 'readPropBag readPropBag 'fixIndParamsCB fixIndParamsCB)
+))

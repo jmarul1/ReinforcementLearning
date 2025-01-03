@@ -1,0 +1,14 @@
+#!/usr/bin/env python3.7.4
+     
+##############################################################################
+# Argument Parsing
+##############################################################################
+import argparse, subprocess
+argparser = argparse.ArgumentParser(description='Get Lib Path from cadence lib')
+argparser.add_argument(dest='lib', type=str, help='Library in the cdslib')
+args = argparser.parse_args()
+##############################################################################
+# Main Begins
+##############################################################################
+subprocess.call('/nfs/pdx/disks/xchip.disk.1/wireless_common/jmarulan/utils/scripts/getCells.py -p '+args.lib,shell=True)
+exit(0)

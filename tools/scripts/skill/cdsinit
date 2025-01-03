@@ -1,0 +1,62 @@
+/*
+##############################################################################
+# Intel Top Secret                                                           #
+##############################################################################
+# Copyright (C) 2016, Intel Corporation.  All rights reserved.               #
+#                                                                            #
+# This is the property of Intel Corporation and may only be utilized         #
+# pursuant to a written Restricted Use Nondisclosure Agreement               #
+# with Intel Corporation.  It may not be used, reproduced, or                #
+# disclosed to others except in accordance with the terms and                #
+# conditions of such agreement.                                              #
+#                                                                            #
+# All products, processes, computer systems, dates, and figures              #
+# specified are preliminary based on current expectations, and are           #
+# subject to change without notice.                                          #
+##############################################################################
+#
+# Author:
+#   Mauricio Marulanda
+*/
+;load "/nfs/pdx/disks/x22.cad.1/cad_root/icv/K-2015.06-SP2-6/etc/VUE/SkillVueMenu.il"
+sstatus debugMode t
+sstatus stacktrace 3
+; auto check out
+ddAutoCtlSetVars(0 0 3 0)
+
+;set editor to nedit
+editor="nedit"
+
+; Load Skill files in the WORKAREA/skill and PROJECTAREA/SKILL 
+let( (customSkillDirs fileFullpath)
+; env = getShellEnvVar("PROJECT")
+ customSkillDirs = list("~jmarulan/work_area/utils/scripts/skill" 
+                        strcat("~jmarulan/work_area/utils/scripts/oceanScripts"))
+ foreach( customSkillDir customSkillDirs
+  when(and(isDir(customSkillDir) isReadable(customSkillDir))
+    printf("adSkillInfo - Loading Skill files from directory %s.\n" customSkillDir)
+    foreach( file setof(x getDirFiles(customSkillDir) equal(".il" index(x ".il")))
+      sprintf(fileFullpath "%s/%s" customSkillDir file)
+      if( isReadable(fileFullpath) then
+        printf("adSkillInfo - Loading %s ... \n" fileFullpath)
+  	unless(loadi(fileFullpath)
+	  printf("WARNING: File %s could not been loaded\n" file)
+		  
+        ) ; unless
+      ) ; if 
+    ) ; foreach
+  ) ; when
+);foreach
+); let
+pi = 3.1416
+warn("\nFinished Loading MM Skill Scripts\n")
+
+; Create a loading procedure
+procedure( loadme()
+  load("/nfs/pdx/disks/xchip.disk.1/wireless_common/jmarulan/utils/scripts/skill/cdsinit")
+)
+
+procedure( fresh()
+  foreach(cv setof(ff dbGetOpenCellViews() ff~>isParamCell)
+    dbRefreshCellView(cv) )
+)

@@ -1,0 +1,58 @@
+technology,property,value
+1222,gndPad,tcrow_dot28_s22j:tc1padrf90_g
+1222,sigPad,tcrow_dot28_s22j:tc1padrf90_s
+1222,padOrigin,25.92:28.98
+1222,padPitchX,105.84
+1222,padPitchY,100.8
+1222,rowSize,2160:100.8
+1222,dutOrigin,164.16:86.94
+1222,dutPitch,397.44
+1222,c4,c4
+1222,llcEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,lrcEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,ulcEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,urcEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,botEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,topEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,lefEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,rigEtestToRf,tcrow_dot28_s22j:tp0rffiller_transition
+1222,rfFill,tcrow_dot28_s22j:tp0rffiller_uptom6
+1222,topRfToInd,tcrow_dot28_s22j:tp0rffiller_transition
+1222,lefRfToInd,tcrow_dot28_s22j:tp0rffiller_transition
+1222,rigRfToInd,tcrow_dot28_s22j:tp0rffiller_transition
+1222,botRfToInd,tcrow_dot28_s22j:tp0rffiller_transition
+1222,baseHdFill1,tcrow_dot28_s22j:p1222_28_filler_m6h_hd
+1222,baseLdFill1,tcrow_dot28_s22j:p1222_28_filler_m6h_ld
+1222,topIndFill1,tcrow_dot28_s22j:p1222_28_filler_m7o_hd
+1222,topIndFill2,tcrow_dot28_s22j:p1222_28_filler_gmzo_hd
+1222,topIndFill3,tcrow_dot28_s22j:p1222_28_filler_gm0o_hd
+1222,topIndFill4,tcrow_dot28_s22j:p1222_28_filler_gmbo_hd
+1222,topLayers,"gmb gm0 gmz"
+1222,rowBlockages,c4
+1222,etestFill,tcrow_dot28_s22j:tp0rffiller_transition
+###################### 1278
+1278,gndPad,primx78a_x78x_lay:tc1padrf90_g_50u
+1278,sigPad,primx78a_x78x_lay:tc1padrf90_s_50u
+1278,padOrigin,54:15.84
+1278,padPitchX,104.4
+1278,padPitchY,50.4 #100.8
+1278,rowSize,2151:97.92
+1278,dutSize,43.2:43.2
+1278,bump,bsb
+1278,llcEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,lrcEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,ulcEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,urcEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,botEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,topEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,lefEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,rigEtestToRf,xtrrfvrx78a_x78x_lay:x78a_tp0etest2rf_var_bm2h
+1278,rfFill,xtrrfvrx78a_x78x_lay:x78a_tp0rffiller_var_bm2h_hd
+1278,gndFill,xtrrfvrx78a_x78x_lay:x78a_gnd_mesh#x78a_tp0rffiller_var_bm2h_hd
+1278,dutFiller,
+1278,topFill1,xtrrfvrx78a_x78x_lay:x78a_bm4o_var_hd:0.999
+1278,topFill2,indx78a_x78x_lay:x78a_bm3o_hd:0.269
+1278,topLayers,"bm4 bm3"
+1278,rowBlockages,"BC bsb c4b"
+1278,etestFill,indx78a_x78x_lay:x78a_etest_bm2h_hd
+

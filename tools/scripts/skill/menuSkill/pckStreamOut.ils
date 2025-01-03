@@ -1,0 +1,234 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Filename: pckStreamOut.ils                   Project: TCC
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; (C) Copyright Intel Corporation, 2005
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Functional description:
+;;     Functions to build a Stream file
+;;
+;;
+;; Revision History:
+;;     10/24/2005 Bill Harris       Original.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; (load "pckStreamOut.ils")
+;;
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defun pckStreamOut ( ) t)
+(defun pckMakeStreamFileNew ( ) t)
+(let ()
+
+  (defun _pckStreamOut ( libName cellName cellView runDir stmFile
+								 @key (stm_options "") )	
+	(let ( tmplFile retval)
+	  (pckInfo "pckStreamOut" "Starting stream out process.")
+	  
+	  (pckMakeStreamFileNew runDir libName cellName cellView stmFile ?stm_options stm_options) 
+	  (if (isFile stmFile)
+		(progn
+		  (setq retval stmFile)
+		  )
+		(progn 
+		  (pckWarn "pckStreamOut" "Stream file not generated!")
+		  (setq retval nil))
+		  )
+	  retval
+	  )		
+	)	
+
+(defun DeleteThisFile (fileName)
+  (let (syscmd)
+	(setq syscmd (strcat "rm -f " fileName))
+	(sh syscmd)
+	)
+  )
+
+;;
+;; Call Cadence 6.x strmout to create a stream file
+;; This is for Cadence 6.1 and above which uses new streamout software
+;;
+
+(defun _pckMakeStreamFileNew (runDir libName cellName cellView stmFile
+									 @key dontRun (stm_options ""))
+
+  (pckInfo "pckMakeStreamFileNew" "Using pckMakeStreamFileNew function for stream-out.") 
+  (let (syscmd shellcmd cmdFile logFile mapFile cdsLib result projUtils (maxVertices "3500"))
+
+	(setq projUtils "$PCK_COLLATERAL_SKILL")
+	(setq logFile (strcat libName "_" cellName "_streamout.log"))     
+
+	;;
+	;; for now - no use of runDir - FDK using lib.defs without relying on CDSLIB
+	;;
+	;; (unless (isDir runDir)
+	;;   (pckWarn "pckMakeStreamFileNew"
+	;; 		   (sprintf nil "Directory %s does not exists. Cannot change to stream out target directory." runDir)))
+    (setq cdsLib (getShellEnvVar "CDSLIB"))
+	(unless  cdsLib
+	  (setq cdsLib (ddGetForcedLib)))
+	(if (and (equal cdsLib "") (isFile (strcat (getShellEnvVar "FDK_WORK") "/cds.lib"))) 
+	  (progn
+		(setq cdsLib (strcat (getShellEnvVar "FDK_WORK") "/cds.lib"))		
+		)
+	  (progn
+		(pckError "pckMakeStreamFileNew" (sprintf nil "Could not find suitable cds.lib file."))
+		)
+	  )
+	
+	(sprintf syscmd "cd %s ; rm -f cds.lib; ln -s %s cds.lib; strmout -techLib fdk71pxtech -library %s -topCell %s -view %s -strmFile %s -flattenPcells -userSkillFile %s/loader.il -layerMap %s -objectMap %s -maxVertices %s -outputDir %s %s > %s\n" 
+			 runDir
+			 cdsLib
+			 libName
+			 cellName
+			 cellView
+			 stmFile
+			 projUtils			 
+			 (strcat
+			  (getShellEnvVar "FDK_OATECH_DIR") "/fdk71pxtech.layermap")
+			 (strcat
+			  (getShellEnvVar "FDK_OATECH_DIR") "/fdk71pxtech.objectmap")
+			 maxVertices			 
+			 runDir
+			 stm_options
+			 logFile
+			 )
+	(pckInfo "pckMakeStreamFileNew" (sprintf nil "Stream out command:: %s" syscmd))	
+		
+
+	(if dontRun
+	  (progn 
+		(pckInfo "pckMakeStreamFileNew" "Command has been created but not run!")		
+		(setq result syscmd))
+	  (progn		
+		(setq result (csh syscmd)))
+	  )
+	result
+	)
+  )
+
+(defun pckCreateCommandFile ( fileName text ) 
+  (let ( TMPL )  
+	( setq TMPL ( outfile fileName "w" ) )
+	( fprintf TMPL "%s\n" text) 
+	( drain TMPL )
+	( close TMPL )
+	t
+	)  
+  )    
+
+(defun pckCreateCDSFile (dir)
+  (let ()
+
+	(printf "Creating cds.lib in %s.\n" dir)
+	(DeleteThisFile strcat( dir "/cds.lib"))
+	(system (sprintf nil "ln -s %s %s/cds.lib" (ddGetForcedLib) dir))
+	(sleep 2)
+	) 
+  );; pckCreateCDSFile
+
+;;
+;; Create temporary template file for call to pipo strmout
+;;
+
+(defun pckMakeTemplateFile ( libName cellName viewName runDir stmFile @optional tmplFile)
+
+  (let ( pOut logFileName layerTable loader retval)
+
+	(unless tmplFile
+	  (setq tmplFile (strcat runDir "/" cellName "_" viewName ".tmpl"))
+		)
+
+	(DeleteThisFile tmplFile)
+
+	(if (equal pOut (outfile tmplFile "a"))
+		(progn
+		  (sprintf logFileName "PIPO_%s_%s.log" cellName viewName )
+
+		  ;; (setq layerTable
+		  ;; 	  (strcat
+		  ;; 	   (getShellEnvVar "ISSRUNSETS") "/Standard/p" 
+		  ;; 	   (getShellEnvVar "PROCESS_NAME") ".map"))
+		  ;;
+		  ;; layer/strm number information is coming from the techfile
+		  ;;(setq layerTable (strcat (getShellEnvVar "FDK_ICV_RUNSETS_DIR/") ))
+		
+		(setq loader (strcat (getShellEnvVar "FDK_WORK") "/pck_collateral/loader.il"))
+		(fprintf pOut (pckStreamoutTemplate) runDir libName cellName viewName
+				 stmFile logFileName 
+				 loader)
+
+		(when pOut
+		  (close pOut))
+		(setq retval tmplFile))
+		(progn
+		  (pckWarn "pckMakeTemplateFile" (sprintf nil "Can't write to file %s\n" tmplFile))
+		  (setq retval nil)
+		  )
+		) ;; Template file is writeable
+	retval
+	)	
+  )	 
+ 
+(defun pckStreamoutTemplate ()
+    (let (text)
+      text = "streamOutKeys = list(nil\n
+        'runDir                 %L\n
+        'libName                %L\n
+        'primaryCell            %L\n
+        'viewName               \"%s\"\n
+        'outFile                \"%s\"\n
+        'scale                  0.001000\n
+        'units                  \"micron\"\n
+        'hierDepth              32\n
+        'convertToGeo           t\n
+        'maxVertices            200\n
+        'refLib                 nil\n
+        'libVersion             \"5.0\"\n
+        'checkPolygon           nil\n
+        'snapToGrid             nil\n
+        'simMosaicToArray       t\n
+        'caseSensitivity        \"preserve\"\n
+        'lineToZeroPath         \"path\"\n
+        'convertDot             \"ignore\"\n
+        'rectToBox              nil\n
+        'convertPathToPoly      nil\n
+        'keepPcell      nil\n
+        'useParentXYforText     nil\n
+        'reportPrecision        nil\n
+        'runQuiet               nil\n
+        'errFile                \"%s\"\n
+        'NOUnmappingLayerWarning               nil\n
+        'techFileChoice         nil\n
+        'pcellSuffix            \"DbId\"\n
+        'respectGDSIILimits             nil\n
+        'dumpPcellInfo          nil\n
+        'cellMapTable           \"\"\n
+        'layerTable             \"\"\n
+        'textFontTable          \"\"\n\n
+        'convertPin             \"geometry\"\n
+        'pinInfo                0\n
+        'pinTextMapTable        \"\"\n
+        'propMapTable           \"\"\n
+        'propSeparator          \",\"\n
+        'userSkillFile          %L\n
+        'rodDir                 \"\"\n
+)";; defines text
+      text
+) ;; let
+) ;; pckStreamoutTemplate
+
+/*************************************************************************/
+
+(setq pckStreamOut _pckStreamOut)
+(setq pckMakeStreamFileNew _pckMakeStreamFileNew)
+
+);outermost let

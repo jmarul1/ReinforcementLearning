@@ -1,0 +1,200 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# *****************************************************************************/
+#
+#/******************************************************************************
+# * Filename: spXtract
+# * Overview: Run spExtract given subcircuits
+#             (It would be nice to generalize this for S-parameters.)
+# * Date:     Q2, 2006
+# * Changed:  Q3, 2006; Q2, 2008 (Use LynxSpice instead)
+# *****************************************************************************/
+
+use strict;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+my %optctl;
+&GetOptions(\%optctl, 'help', 'y', 'z', 's', 'ports=i',
+                      'ts', 'snp', 'citi', 'ri', 'float=i',
+                      'fstart=f', 'fstop=f', 'nsample=i',
+                      'log', 'linear', 'invoke-ride', 'keep',
+                      'mp', 'ride=s', 'lynx=s', 'extension=s',
+                      'temp=f');
+
+my $temp = 25;
+$temp = $optctl{temp} if (defined $optctl{temp});
+
+my $ride = "/nfs/site/eda/group/SYSNAME/tcad/RFDesigner/ride/ride";
+if (! -e $ride) {
+  $ride= "ride";
+}
+if ($optctl{"ride"}) {
+  $ride = $optctl{"ride"};
+}
+
+my $lynx = "/p/dt/cad/i386_linux26/lynx/latest/bin/lynxSpice";
+if (! -e $lynx) {
+  $lynx = "lynxSpice";
+}
+if ($optctl{"lynx"}) {
+  $lynx = $optctl{"lynx"};
+}
+
+my $ports = 0;
+if ($optctl{"ports"}) {
+  $ports = $optctl{"ports"};
+}
+
+my $paramType = "s";
+if ($optctl{"y"}) {
+  $paramType = "y";
+} elsif ($optctl{"z"}) {
+  $paramType = "z";
+}
+
+my $outType = "ts";
+if ($optctl{"snp"} || $optctl{"invoke-ride"}) {
+  $outType = "snp";
+} elsif ($optctl{"citi"}) {
+  $outType = "citi";
+}
+
+my $repType = "ri";
+if ($optctl{"mp"}) {
+  $repType = "mp";
+}
+
+my $sampType = "lin";
+if ($optctl{"log"}) {
+  $sampType = "log";
+}
+
+my $fstart = 0.5E9;
+if ($optctl{"fstart"}) {
+  $fstart = $optctl{"fstart"};
+}
+
+my $fstop = 40.0E9;
+if ($optctl{"fstop"}) {
+  $fstop = $optctl{"fstop"};
+}
+
+my $nsample = 59;
+if ($optctl{"nsample"}) {
+  $nsample = $optctl{"nsample"};
+}
+
+my $float = 0;
+if ($optctl{"float"}) {
+  $float = $optctl{"float"};
+}
+
+$| = 1;
+
+if ($#ARGV < 0 || $optctl{"help"}) {
+  print <<EOF;
+Usage: $0 [options] subcircuits
+Options: [-help|-h]          This help
+         [-y/-z/-s]          Y/Z/S parameters (S is the default)
+         [-ts/-snp/-citi]    Table (default), Touchstone, or Citi formats
+         [-mp/-ri]           Magnitude-phase or real-imaginary (default)
+         [-log/-linear]      Log or linear (default) frequency sampling
+         [-ride=path]        Use specified RIDE
+         [-invoke-ride|-i]   Run RIDE afterward, implies -snp
+         [-lynx=path]        Use specified Lynx
+         [-ports|-p=#]       Ground all ports >= # (Default is no grounding.)
+         [-fstart=#]         Specify start frequency in GHz (default = 0.5 GHz)
+         [-fstop=#]          Specify end frequency in GHz (default = 30.0 GHz)
+         [-nsample|-n=#]     Number of frequency samples (default = 59)
+         [-keep|-k]          Keep all files after the runs
+         [-float=#]          Float the last # S-parameter nodes
+         [-extension=string] Use string as the appended name instead of "driver"
+         [-temp=#]           Specify temperature
+EOF
+  exit(0);
+}
+
+my $ext="driver";
+if ($optctl{extension}) {
+  $ext = $optctl{extension};
+}
+
+for (my $f = 0; $f <= $#ARGV; $f++) {
+  my $file = $ARGV[$f];
+  $file =~ s/\.[a-zA-Z]+$//;
+  my $base = "$file\_$ext";
+  $file = "$base.sp";
+  open SPIN, $ARGV[$f] or die "ERROR: Cannot open $ARGV[$f].\n";
+  my $subckt = "";
+  my $gotSubCkt = 0;
+  my $truePorts = 0;
+  while (<SPIN>) {
+    if (/^\s*\.[Ss][Uu][Bb][Cc][Kk][Tt]\s+/) {
+      my @words = split '\s+';
+      $subckt = $words[1];
+      $truePorts = $#words - 1;
+      ++$gotSubCkt;
+    }
+  }
+  $gotSubCkt or die "ERROR: Cannot find subcircuit in $ARGV[$f].\n";
+  $gotSubCkt == 1 or die "ERROR: Multiple subcircuits in $ARGV[$f].\n";
+  open SPOUT, ">$file" or die "ERROR: Cannot open $file.\n";
+  print SPOUT ".OPTION  DELMAX=5p DCSTEP=1ns POST=1 INTERP PARHIER=GLOBAL\n",
+              "+        BRIEF=0 NOELCK RMIN=1E-5 INGOLD=0 VFLOOR=1p LIST\n",
+              ".TEMP $temp\n\n.include '$ARGV[$f]'\nX";
+  my $c;
+  for ($c = 1; $c <= ($ports ? $ports : $truePorts); $c++) {
+    print SPOUT " $c";
+  }
+  print SPOUT " $subckt\n";
+  for (my $c = 1; $c <= ($ports ? $ports : $truePorts) - $float; $c++) {
+    print SPOUT "Port$c $c 0\n";
+  }
+  print SPOUT  ".LIN modelname=spextract filename=$base\n",
+               "+    format=$outType dataformat=$repType\n",
+               "+    matrixchoice=$paramType\n";
+  print SPOUT "\nRzero vss_special 0 1.0E-6\n" if (`grep -c vss_special $ARGV[$f]` > 0);
+  printf SPOUT "\n.AC $sampType $nsample %13.9le %13.9le\n",
+               $fstart, $fstop;
+  print SPOUT "\n.end\n";
+  close SPOUT;
+  print "$file:\n  Lynx... ";
+  open COUGAR, "$lynx -ng $file |" or die "ERROR: Cannot run $lynx.\n";
+  while (<COUGAR>) {
+    die "ERROR: Lynx issued error: $_" if (/^-E-/);
+    die "ERROR: Lynx issued warning: $_" if (/^-W-/);
+  }
+  print "done\n";
+  if ($optctl{"invoke-ride"}) {
+    if (exists $optctl{"keep"}) {
+      system "cp $file $file\_kept";
+    }
+    print "  RIDE... ";
+    my $portNo = $ports ? $ports : $truePorts;
+    $portNo -= $float;
+    my $snp = "${base}.s${portNo}p";
+    open RIDE, "$ride -pi-extract = $snp|" or die "ERROR: Cannot run $ride.\n";
+    while (<RIDE>) {
+      die "ERROR: RIDE issued error: $_" if (/ERROR/);
+    }
+    print "done\n";
+  }
+  if (not exists $optctl{"keep"}) {
+    print "  Cleanup... ";
+    unlink "$base.ckt", "$base.out", "$base.print", "$base.runinput", "$base.pmat",
+           "$base.ymat", "$base.ptbl", "$base.tbl", "$base.q", "$base.sp",
+           "$base.spo", glob("$base\_1.*"), glob("$base\_opt.*");
+    print "done\n";
+  }
+}

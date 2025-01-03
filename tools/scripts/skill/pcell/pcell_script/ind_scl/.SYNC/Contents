@@ -1,0 +1,10 @@
+2
+keyed
+<Name><State><Vault><Branch><Version><DateFetched><Log><Conflict><StickyTag><MergedFrom>
+<fdkPcell_ind_sclCB.il><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/ind_scl/fdkPcell_ind_sclCB.il;><1><1.28><1437772822><><F><><><Checksum=51a3f9b9><Size=177278><vctime=1437772822>
+<ind_scl.csv><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/ind_scl/ind_scl.csv;><1><1.32><1416339977><><F><><><Checksum=3860fd8f><Size=6375><vctime=1416340729>
+<fdkCdf_ind_sclCB.il><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/ind_scl/fdkCdf_ind_sclCB.il;><1><1.28><1416184173><><F><><><Checksum=5584f77c><Size=22532><vctime=1416184196>
+<fdkCdf_ind_scl.cdf><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/ind_scl/fdkCdf_ind_scl.cdf;><1><1.24><1414704433><><F><><><Checksum=eb587bb6><Size=9851><vctime=1414704765>
+<fdkPcell_ind_scl.pc><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/ind_scl/fdkPcell_ind_scl.pc;><1><1.9><1375129200><><F><><><Checksum=7d5e134><Size=4227><vctime=1375131889>
+
+

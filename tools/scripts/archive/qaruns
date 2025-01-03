@@ -1,0 +1,180 @@
+#!/usr/bin/env python3.7.4
+##############################################################################
+# Intel Top Secret                                                           #
+##############################################################################
+# Copyright (C) 2013, Intel Corporation.  All rights reserved.               #
+#                                                                            #
+# This is the property of Intel Corporation and may only be utilized         #
+# pursuant to a written Restricted Use Nondisclosure Agreement               #
+# with Intel Corporation.  It may not be used, reproduced, or                #
+# disclosed to others except in accordance with the terms and                #
+# conditions of such agreement.                                              #
+#                                                                            #
+# All products, processes, computer systems, dates, and figures              #
+# specified are preliminary based on current expectations, and are           #
+# subject to change without notice.                                          #
+##############################################################################
+import pdb
+## Global Text
+H1 = 'Helvetica',22; H2 = 'Helvetica',18; H3 = 'Helvetica',15; H4 = 'Helvetica',12; HL = 'Helvetica',13,'bold','italic'
+
+def envDefaults():
+  import collections
+  temp = collections.OrderedDict()
+  temp['1231']=['0']; temp['1274'] = ['7','11'];  temp['1276'] = ['22','31','41'];  temp['1278'] = ['21']; 
+  return temp
+
+def setupEnv(tech,dotProc):
+  import subprocess, os
+  #### environment starts
+  startCmdDt = {
+'1278':'/p/adx/x78aa -w pde1',
+'1276':'/p/adx/shdk76setup -w wict_de -b x76c:x76ctemplate.X76CAwork -ot p1276_setup_cad18_runset0.6.0.ot',
+'1274':'/p/adx/x74dsetup -g p1222 -w wict_de -m TEMPLATE_DEV -n X74D/layerDrop -ot techfiles_v78.ot', 
+'1231':'source /nfs/pdx/disks/wict_tools/env/p1231/wictsetup' }
+  #### qa libraries
+  qaLibDt = {
+'1278':'intel78qa /nfs/pdx/disks/wict_tools/releases/RF_COLLATERAL/qaLibs/intel78qa',
+'1276':'intel76qa /nfs/pdx/disks/wict_tools/releases/RF_COLLATERAL/qaLibs/intel76qa',
+'1274':'intel74qa /nfs/pdx/disks/wict_tools/releases/RF_COLLATERAL/qaLibs/intel74qa', 
+'1231':'intel31qa /nfs/pdx/disks/wict_tools/releases/RF_COLLATERAL/qaLibs/intel31qa'  }
+  #### run areas
+  runArea = '/nfs/pdx/disks/dcti_disk0036/work_x22a/template_de2/template_QA/runQaAreaWiCT'; runArea = runArea+'/p'+tech
+  #### return
+  return startCmdDt[tech],qaLibDt[tech],runArea
+
+def createWindow():
+  import tkinter as tk
+  window = tk.Tk()
+  window.title("SiCT QA Regressions")
+  window.geometry('1000x275'); 
+  return window
+  
+def createGuiMenu(envs,dTechs,window):
+  import tkinter as tk
+  dots,qalibs,setups,logs,runareas = {},{},{},{},{}; headings = ['tech','dot','setup','run','logs']
+  # initialize logs,dots since values need to be available to the other buttons for update
+  for tech,dotLst in list(dTechs.items()):
+   logs[tech]={} 
+   for dot in dotLst:
+    qalibs[tech],runareas[tech] = envs[tech][1],envs[tech][2];
+    logV,dotV = tk.StringVar(), tk.StringVar(); dotV.set(dot) 
+    cmd1 = lambda p1=tech,p2=dotV,p3=runareas[tech] : popLink(p1,p2,p3); logButton = tk.Button(window,textvariable=logV,width=8,command=cmd1);
+#    cmd2 = lambda p1='self',p2=tech,p3=runareas[tech],p4=[logButton,logV]: dotUpdate(p1,p2,p3,p4); dotMenu = tk.OptionMenu(window,dotV,*dotLst,command=cmd2); 
+    dotUpdate(dot,tech,runareas[tech],[logButton,logV]); logs[tech][dot] = logButton,logV; #dots[tech] = dotMenu,dotV
+  # build the gui  
+  for col,entry in enumerate(headings):
+    row = 0
+    for tech,dotLst in list(dTechs.items()):
+     for dot in dotLst: 
+      if entry == 'tech': temp=tk.Label(window,text=tech,font=H2); temp.grid(column=col,row=1+row); # create techs
+      if entry == 'dot': temp=tk.Label(window,text=dot,font=H2,width=2).grid(column=col,row=1+row); #dots[tech][0].grid(column=col, row=1+row); dots[tech][0].config(font = H3, width=2);  # create dots
+      if entry =='setup': 
+        entryV = tk.StringVar(); entryV.set(envs[tech][0]); temp = tk.Entry(window,textvariable=entryV,bg='white',font=H4,width=85); 
+        temp.grid(column=col, row=1+row); setups[tech] = entryV # create env setups
+      if entry == 'logs': logs[tech][dot][0].grid(column=col,row=1+row); 
+      row+=1
+  return setups,logs,qalibs,runareas
+
+def runProg(cmd):
+  import qa, os, subprocess
+#  log = subprocess.run('debugQa.py',shell=True,capture_output=True); print(log.stdout); return qa.decode(log.stdout.decode()),''
+  for tries in [1,2,3]:
+    log = subprocess.run(cmd,shell=True,capture_output=True)
+    test = qa.decode(log.stdout.decode());
+    if test and test == 'ReRunMe': print( 'RETRY'); continue #env fluke error retry
+    elif test and len(test.split())==4: return test,'' #return the files
+    elif test:
+      testSp = test.split() 
+      if os.path.isdir(testSp[0]): envFout = open(testSp[0]+'/env.log','wb'); envFout.write(b' '.join([log.stdout,log.stderr])); envFout.close()
+      return test+' ABORTED','' #runs went thru but runs failed
+    else: break #something went wrong with the run setup/exec return False and the errors
+  return False,b' '.join([log.stdout,log.stderr]) #something went wrong with the run setup/exec return False and the errors
+
+def createHtml(techDot,logs,outDir):
+  import re
+  fHtml = outDir+'/p'+techDot+'_sictqa.html'; 
+  htmlLst = ['<table cellspacing="1" border="1"><tr><td colspan="3"><h1>PTD AD QA</h1></td></tr>']
+  items,errs = logs
+  if items == False: return False
+  htmlLst += ['<tr><td valign="middle" align="center" rowspan="2" style="color:indigo"><h2>'+techDot+'</h2></td>']
+  items = items.split(); resultC = 'red' if re.search(r'fail|abort',items[3],flags=re.I) else 'green'
+  htmlLst += ['<td valign="middle" align="center"><a href="'+items[0]+'" style="color:blue"><h2>QA Results</a><br><font color="'+resultC+'">'+items[3]+'</font></h2></td>']
+  htmlLst += ['<td valign="middle" align="center" rowspan=2><h3>runset:<br>'+items[2]+'</h3></td></tr>']
+  htmlLst += ['<tr><td valign="middle" align="center"><a href="'+items[1]+'" style="color:darkslategray"><h3>Run Logs</h3></a></td></tr>']    
+  htmlLst += ['</table>']
+  with open(fHtml,'w') as fout: fout.write('\n'.join(htmlLst)); return fHtml 
+
+def isThereLog(tech,dot,qaArea): 
+  import os, subprocess
+  report = qaArea+'/p'+tech+'_'+dot+'_sictqa.html'
+  if os.path.isfile(report): 
+    if subprocess.run('grep PASS '+report,shell=True,capture_output=True).stdout: return report,True
+    return report,False
+  else: return False,False
+
+def runMe(pool,*args):
+  runTheQa(*args)
+#  pool.apply_async(runTheQa,[*args])
+    
+def runTheQa(self,tech,dot,setup,qaLib,runArea,logObj):
+  import subprocess, qa, os; import tkinter as tk
+  setup = setup.get(); dotUpdate(dot,tech,runArea,logObj,activeThread=True); self.config(state='disabled')
+  ## Delete previous report
+  test,st = isThereLog(tech,dot,runArea);
+  if test: subprocess.run('rm -f '+test,shell=True); dotUpdate(dot,tech,runArea,logObj,activeThread=True)
+  ## Build the main command
+  cmd = ' '.join(['runRepQaV2.py','-dot',dot,'-qalib',qaLib,'-runarea',runArea]); runFile = runArea+'/runQa_'+tech+'_'+dot+'.csh'
+  if not os.path.exists(runArea): subprocess.call('mkdir '+runArea,shell=True)
+  cmd = f'; {cmd}' if tech in ['1231'] else f"-cmd '{cmd}'" 
+  with open(runFile,'w') as fout: fout.write(f'{setup} {cmd}\n')
+  logs = runProg(f"wash -n users p1222 f1231 p1274 p1276 p1278 -c 'source {runFile}'");  outF = createHtml('_'.join([tech,dot]),logs,runArea)
+  if outF == False: print(logs)
+  ## update the logs
+  dotUpdate(dot,tech,runArea,logObj); self.config(state='normal')
+  return outF
+
+def popLink(tech,dot,qaArea):
+  import subprocess
+  path,st = isThereLog(tech,dot.get(),qaArea)
+  if path: subprocess.call('firefox '+path+'&',shell=True,stderr=subprocess.PIPE,stdout=subprocess.PIPE)
+
+def dotUpdate(dot,tech,qaArea,logObj,activeThread=False):
+  import tkinter as tk
+  logB,logV = logObj;
+  if activeThread: logV.set('Running QA'); logB.config(font=H3,fg='black',relief=tk.SUNKEN,activeforeground='black'); return True
+  test,st = isThereLog(tech,dot,qaArea); text,color = ('CLEAN','darkgreen') if st else ('FAIL','red')
+  if test: logV.set(text); logB.config(font=HL,fg=color,relief=tk.RAISED,activeforeground='white',activebackground='red') #update the htmlButton 
+  else: logV.set('No Log'); logB.config(font=H3,fg='black',relief=tk.SUNKEN,activeforeground='black') 
+  
+##############################################################################
+# Main Begins
+##############################################################################  
+import tkinter as tk, subprocess,os, multiprocessing
+# create main window
+window = createWindow()
+headings = []; guiPool = multiprocessing.Pool()
+for ii,head in enumerate(['Tech','Dot','Environment Setup','','Reports']):
+  headings.append(tk.Label(window, text=head, font=H1, fg='blue', width=len(head)+2)); headings[-1].grid(column=ii,row=0)
+# create the envs defaults
+dTechs = envDefaults(); envs={}; 
+for tt,dotLst in list(dTechs.items()): envs[tt] = setupEnv(tt,dotLst[0])
+# create menu for envs
+setups,logs,qaLibs,runAreas = createGuiMenu(envs,dTechs,window); row=0
+# create the buttons for action
+for tech,dotLst in list(dTechs.items()):
+  for dot in dotLst:  
+   button = tk.Button(window,text='RUN QA',activeforeground='white',activebackground='red',width=7)
+   button['command'] = lambda pool=guiPool,p0=button,p1=tech,p2=dot,p3=setups[tech],p4=qaLibs[tech],p5=runAreas[tech],p6=logs[tech][dot] : runMe(pool,p0,p1,p2,p3,p4,p5,p6)
+   button.grid(column=3,row=1+row); row+=1
+# create a button for qaLibs
+mArea = os.path.dirname(envs[list(dTechs.keys())[0]][1].split()[1]);  #qa directory
+cmdX = lambda p1=mArea: subprocess.call('konsole --workdir '+p1,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+tk.Button(window,text='qaLibraries',font=H1,activebackground='green',width=12,command=cmdX).grid(column=2,row=row+2)
+# create a button for runArea
+rAreas = os.path.dirname(runAreas[list(dTechs.keys())[0]]);  #qa directory
+cmdX = lambda p1=rAreas: subprocess.call('konsole --workdir '+p1,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+tk.Button(window,text='runAreas',font=H4,activebackground='green',command=cmdX).grid(column=3,row=row+2)
+
+# window
+window.mainloop()

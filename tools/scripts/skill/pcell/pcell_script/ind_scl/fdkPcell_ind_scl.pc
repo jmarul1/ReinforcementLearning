@@ -1,0 +1,103 @@
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Intel Top Secret, Intel Proprietary                                      ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Copyright (C) 2011, Intel Corporation.  All rights reserved.             ;;
+;;                                                                          ;;
+;; This is the property of Intel Corporation and may only be utilized       ;;
+;; pursuant to a written Restricted Use Nondisclosure Agreement             ;;
+;; with Intel Corporation.  It may not be used, reproduced, or              ;;
+;; disclosed to others except in accordance with the terms and              ;;
+;; conditions of such agreement.                                            ;;
+;;                                                                          ;;
+;; All products, processes, computer systems, dates, and figures            ;;
+;; specified are preliminary based on current expectations, and are         ;;
+;; subject to change without notice.                                        ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                       Scalable INDUCTOR PCELL 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+procedure( fdkPcell_ind_scl( libraryName cellName)
+  let( ( cellObject defCentertap defCoilspcx defCoilwx defIndShape 
+    defInnerwx defInnerwy defNrturns defTermextx defTermside 
+    defTermspcy defToplayer defaults)
+
+
+    cellObject = ddGetObj( libraryName cellName)
+    defaults = fdkGetPropTable( cellObject ?name "defaults" ?string t)
+
+    ;; Get default values defined in the property bag
+    defIndShape = defaults["indShape"]
+    defNrturns = defaults["nrturns"]
+    defToplayer = defaults["toplayer"]
+    defInnerwx = defaults["innerwx"]
+    defInnerwy = defaults["innerwy"]
+    defCoilwx = defaults["coilwx"]
+    defCoilspcx = defaults["coilspcx"]
+    defTermextx = defaults["termext"]
+    defTermspcy = defaults["termspc"]
+    defTermside = defaults["termside"]
+    defCentertap = defaults["centertap"]
+
+    ;; Define layout pcell
+    ;;;;;;;;;;;;;;;;;;;;;;
+
+    pcDefinePCell(
+      list( ddGetObj( libraryName) cellName "layout" "maskLayout")
+      (
+	(indShape defIndShape)
+	(nrturns defNrturns)
+	(toplayer defToplayer)
+	(innerwx defInnerwx)
+	(innerwy defInnerwy)
+	(coilwx defCoilwx)
+	(coilspcx defCoilspcx)
+	(termext defTermextx)
+	(termspc defTermspcy)
+	(termside defTermside)
+	(centertap defCentertap)
+	(adddummyfill "No")
+	(solver3d "No")
+      )
+
+      let((pcCellObj drTable paramTable)
+
+        ;; Retrieve required design rules from property bag
+        pcCellObj = ddGetObj( pcCellView~>libName pcCellView~>cellName)
+        drTable = fdkGetPropTable( pcCellObj ?name "designRules")
+
+        ;; Convert formal parameters to usable pcell values
+        paramTable = makeTable("paramTable" nil)
+        paramTable["indShape"] = indShape
+        paramTable["nrturns"] = cdfParseFloatString( nrturns)
+        paramTable["toplayer"] = toplayer
+        paramTable["innerwx"] = fdkPcStringToMicrons( innerwx)
+        paramTable["innerwy"] = fdkPcStringToMicrons( innerwy)
+        paramTable["coilwx"] = fdkPcStringToMicrons( coilwx)
+        paramTable["coilspcx"] = fdkPcStringToMicrons( coilspcx)
+        paramTable["termext"] = fdkPcStringToMicrons( termext)
+        paramTable["termspc"] = fdkPcStringToMicrons( termspc)
+        paramTable["termside"] = termside
+        paramTable["centertap"] = centertap
+        paramTable["adddummyfill"] = adddummyfill
+        paramTable["solver3d"] = solver3d
+        drTable["cellName"] = pcCellView~>cellName
+
+        ;; Create inductor
+        case( indShape
+          ( "symmetrical"
+            fdkCreateSymmInd( pcCellView drTable paramTable))
+          ( "spiral"
+            fdkCreateSpiralInd( pcCellView drTable paramTable))
+        ) ;; case
+
+      ) ; let
+    ) ; pcDefinePCell
+  ) ; let
+) ; procedure
+
+

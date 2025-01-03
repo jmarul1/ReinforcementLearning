@@ -1,0 +1,129 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Filename: pckRingBus.ils           Project: TCC
+;; 
+;;  Version: $Id: pckRingBus.ils.rca 1.1 Fri Dec 17 12:38:14 2010 pvrott Experimental $
+;; 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; Copyright Intel Corporation 2004
+;;
+;; Author: Vincent Rayappa
+;; Keywords: TCC Project, Routing, Ring Bus
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Functional Description:
+;;
+;; Generate layout for ring bus
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; (load "pckRingBus.ils")
+;;
+;;
+
+(defun pckRingBusLayout () t)
+(defun pckRingInit (libName layer padrow) t)
+ 
+(let ()
+
+  (defun drawRingBus (cv layer padrow termPads)
+    (let ((meshPListV (pckGetMeshPList layer t ?isWide t))
+          (meshPListH (pckGetMeshPList layer nil ?isWide t))
+          (numStrips 18)
+          (busingParams (pckGetBusInfo ""  "RNG"))
+          (urPadBbox (pckUpperRightPadBbox padrow "" ""))
+          (llPadBbox (pckLowerLeftPadBbox padrow "" ""))
+          (prProps (pckGetPadInfo ""  padrow))
+          horiMeshWidth vertMeshWidth upperMeshStartPt lowerMeshEndPt rightMeshX path)
+      (setq horiMeshWidth (plus (times numStrips (nth 0 meshPListH)) (times (difference numStrips 1) (nth 1 meshPListH))))
+      (setq vertMeshWidth (plus (times numStrips (nth 0 meshPListV)) (times (difference numStrips 1) (nth 1 meshPListV))))
+      (setq upperMeshStartPt (list (leftEdge llPadBbox)
+                                   (plus (topEdge urPadBbox) (quotient horiMeshWidth 2.0) (get busingParams 'stickout))))    
+      (setq lowerMeshEndPt (list (leftEdge llPadBbox)
+                                 (difference (bottomEdge llPadBbox) (quotient horiMeshWidth 2.0) (get busingParams 'stickout))))
+      (setq rightMeshX (getMeshRightEdge cv layer prProps vertMeshWidth
+                                         (yCoord upperMeshStartPt) (yCoord lowerMeshEndPt)
+                                         urPadBbox (get busingParams 'stickout)))
+      ;;draw the buses (bottom, right, top)
+      (setq path (list upperMeshStartPt (list rightMeshX (yCoord upperMeshStartPt))
+                       (list rightMeshX (yCoord lowerMeshEndPt)) lowerMeshEndPt))
+      (pckInfo "pckRingBus" (sprintf nil "Ring bus path = %L" path))
+      (pckDrawBus cv
+                  numStrips
+                  layer
+                  path
+                  ?isWide t
+                  ?meshPListH meshPListH
+                  ?meshPListV meshPListV)
+      ;;draw the termination
+      (drawTerminations cv layer padrow prProps (get busingParams 'stickout) termPads)))
+  
+  
+  (defun getMeshRightEdge (cv layer prProps meshWidth top bot urPadBbox stickout)
+    ;;right edge is centered in pad right space if no obstructions.
+    ;;otherwise it is put at "stickout" distance from right-most pads
+    (let ((rowX (get prProps 'row_width))
+          (edgeToPadX (get prProps 'll_x1))
+          rigSegLefX rigSegRigX bbox)
+      (setq rigSegLefX (pckPutOnGrid (rowX-((edgeToPadX-meshWidth)/2)-meshWidth)))
+      (setq rigSegRigX (pckPutOnGrid (rigSegLefX+meshWidth)))
+      ;;check if this region is free of obstructions
+      (setq bbox (list (list rigSegLefX top) (list rigSegRigX bot)))
+      (unless (pckNoObstructionsP cv (list bbox) (list layer "maskDrawing"))
+        (setq rigSegLefX (pckPutOnGrid (plus (rightEdge urPadBbox) stickout)))
+        (setq rigSegRigX (pckPutOnGrid rigSegLefX stickout)))     
+      (pckPutOnGrid (quotient (plus rigSegLefX rigSegRigX) 2.0))))
+  
+  (defun drawTerminations (cv layer padrow prProps stickout termPads)
+    (letseq (termStrips urpPt llpPt
+             (meshPListV (pckGetMeshPList layer t ?isWide t))
+             (meshPListH (pckGetMeshPList layer nil ?isWide t))
+             (cd (nth 0 meshPListV))
+             (space (nth 1 meshPListV))
+             (urPadBbox (pckUpperRightPadBbox padrow "" ""))
+             (llPadBbox (pckLowerLeftPadBbox padrow "" "")))            
+            ;;termination mesh to cover 90% of pad
+            (setq termStrips (floor (quotient (plus space (times 0.9 (get prProps 'pad_width)))
+                                       (plus cd space))))
+            (pckInfo "pckRingBus" (sprintf nil "# of term strips = %L" termStrips))               
+            ;;pad16 termination
+            (when (member 16 termPads)
+              (setq urpPt (list (quotient (plus (leftEdge urPadBbox) (rightEdge urPadBbox)) 2.0)
+                                (topEdge urPadBbox)))
+              (pckInfo "pckRingBus" (sprintf nil "Ring bus pad #16 termination path = %L"
+                                             (list urpPt (rodAddToY urpPt stickout))))
+              (pckDrawBus cv
+                          termStrips
+                          layer
+                          (list urpPt (rodAddToY urpPt stickout))
+                          ?isWide t
+                          ?meshPListH meshPListH
+                          ?meshPListV meshPListV))
+            ;;pad1 termination
+            (when (member 1 termPads)             
+              (setq llpPt (list (quotient (plus (leftEdge llPadBbox) (rightEdge llPadBbox)) 2.0)
+                                (bottomEdge llPadBbox)))
+              (pckInfo "pckRingBus" (sprintf nil "Ring bus pad #1 termination path = %L"
+                                             (list llpPt (rodAddToY llpPt (minus stickout)))))
+              (pckDrawBus cv
+                          termStrips
+                          layer
+                          (list llpPt (rodAddToY llpPt (minus stickout)))
+                          ?isWide t
+                          ?meshPListH meshPListH
+                          ?meshPListV meshPListV))))
+   
+  (defun _pckRingBusLayout (cv layer padrow @optional (termPads (list 1 16)))    
+    (drawRingBus cv layer padrow termPads))
+
+  (defun _pckRingInit (libName layer padrow)
+    t)
+
+  (setq pckRingInit _pckRingInit)
+  (setq pckRingBusLayout _pckRingBusLayout))
+
+  
+  
+  

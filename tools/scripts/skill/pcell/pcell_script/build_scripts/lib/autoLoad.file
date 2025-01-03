@@ -1,0 +1,153 @@
+# autoLoad.file
+# Default Synopsys CustomDesigner library auto-loading mechanism for libraries
+
+proc fdkAutoLoad {homeDir isTech } {
+
+    puts "-I- fdkAutoLoad directory: $homeDir"
+    set tbcready 0
+    foreach loadpair [info loaded] {
+       if {[lindex $loadpair 1] == "Tbcload"} {
+           set tbcready 1
+           break
+       }
+    }
+
+    # Source topLoad into memory if it exists for this library
+    set topLoadFilePath "$homeDir/lib_tcl.dir"
+    if { [file exists $topLoadFilePath] } {
+        #first source everything from topLoadFilePath except topLoad.tcl if there
+        set goodFileNames [fdkTopLoad $topLoadFilePath $tbcready [list topLoad]]
+        if {![llength $goodFileNames]} {
+            #this will only happen if nothing sourced (backup)....
+            if { [file exists $topLoadFilePath/topLoad.tcl"] } {
+               if {[catch {source "$topLoadFilePath/topLoad.tcl"} err]} {
+                   puts "-E- Bad source of topLoad.tcl at $topLoadFilePath  $err"
+                   unset err
+               }
+            } elseif { $tbcready } {
+               if { [file exists "$topLoadFilePath/topLoad.tbc"] } {
+                   if {[catch {source "$topLoadFilePath/topLoad.tbc"} err]} {
+                       set eString "-E- Bad source of topLoad.tbc at"
+                       set eString "$eString $topLoadFilePath $err"
+                       puts $eString
+                       unset err
+                   }
+               } else {
+                   puts "-E- Nothing to source. No tcl/tbc at: $topLoadFilePath"
+               }
+
+            } else {
+               set eString "-E- Nothing to source, not tbc ready and no"
+               set eString "$eString topLoad.tcl at $topLoadFilePath"
+               puts $eString
+            }
+        } else {
+            set eString "-I- fdkAutoLoad sourced [llength $goodFileNames]"
+            set eString "$eString tcl/tbc files from $topLoadFilePath"
+            puts $eString
+        }
+    } else {
+        set eString "-E- Nothing to source, no tcl path: $topLoadFilePath"
+        puts $eString
+    }
+
+    # Load OA tech library display.drf
+    if { $isTech && [file exists $homeDir/display.drf]} {
+       dr::loadDisplayResources -filePath $homeDir/display.drf -format drf
+       puts "-I- Display resources loaded from $homeDir/display.drf"
+    } else {
+       if { $isTech } { 
+           puts "-E- Display resources file not found at $homeDir/display.drf"
+       }
+    }
+    return {}
+}
+
+proc fdkTopLoad { {fdkTDir ""} {tbcready ""} {nosource {} } {scriptName ""} } {
+    ## fdkTopLoad is the same for all topLoad.tcl files with exception of
+    ## the ordered list of file names. 
+
+    # get directory
+    if {$fdkTDir == ""} {
+        set scriptPath [file normalize [info script]]
+        set fdkTDir [file dirname $scriptPath]
+        set scriptName [file rootname [file tail $scriptPath]]
+    }
+
+    # determine if able to source tbc files
+    if {$tbcready == ""} {
+        set tbcready 0
+        foreach loadpair [info loaded] {
+            if {[lindex $loadpair 1] == "Tbcload"} {
+                set tbcready 1
+                break
+            }
+        }
+    }
+
+    # establish order dependent required files in order
+    set tFilenameList [list]
+    #...there is no order dependent list for prim or tech!
+
+    # add non-order dependent filenames found in the target directory
+    foreach ext [list "tcl" "tbc"] {
+        foreach tfile [glob -nocomplain "${fdkTDir}/*.${ext}"] {
+            set filename [file rootname [file tail $tfile]]
+            if {[lsearch $tFilenameList $filename] == -1} {
+                #add if not already in the order dependent list
+                if { [lsearch $nosource $filename] == -1} {
+                    #add if not on the no source list
+                    if {$filename != $scriptName} {
+                        lappend tFilenameList $filename
+                    }
+                }
+            }
+        }
+    }
+
+    # keep track of what was sourced and what was not sourced
+    set goodFiles [list]
+    set badFiles [list]
+
+    # source all tFilenames
+    foreach tFilename $tFilenameList {
+        if {[file exists "$fdkTDir/${tFilename}.tcl"]} {
+            if {[catch {source "$fdkTDir/${tFilename}.tcl"} err]} {
+                lappend badFiles [list $tFilename $err]
+            } else {
+                lappend goodFiles $tFilename
+            }
+        } elseif {$tbcready} {
+            if {[file exists "$fdkTDir/${tFilename}.tbc"]} {
+                if {[catch {source "$fdkTDir/${tFilename}.tbc"} err]} {
+                    lappend badFiles [list $tFilename $err]
+                } else {
+                    lappend goodFiles $tFilename
+                }
+            } else {
+                set err "File $tFilename doesn't exist as tbc/tcl at $fdkTDir."
+                lappend badFiles [list $tFilename $err]
+            }
+        } else {
+            set err "File $tFilename.tcl doesn't exist or tbc sourcing not ok."
+            lappend badFiles [list $tFilename $err]
+        }
+    }
+
+    # report
+    set sourceNum [llength $goodFiles]
+    puts "-I- $sourceNum files were sourced from $fdkTDir"
+    if {$sourceNum} {
+        puts "-I- $goodFiles"
+    }
+    if {[llength $badFiles]} {
+        puts "-E- [llength $badFiles] files couldn't be sourced from $fdkTDir"
+        foreach badFilePair $badFiles {
+            puts "-E- [lindex $badFilePair 0] ERROR:[lindex $badFilePair 1]"
+        }
+    }
+    return $goodFiles    
+}
+fdkAutoLoad [file dirname [file normalize [info script]]] 0
+rename fdkAutoLoad ""
+rename fdkTopLoad ""

@@ -1,0 +1,8 @@
+.SUBCKT ind3t p n ct indType=oct dx=95u dy=95u w=3u n=3 s=2u tl=5u ts=5u octSym=1
+RI0 p ct rm4 w=w l=0.01u
+RI1 n ct rm4 w=w l=0.01u
+.ENDS
+
+.SUBCKT ind2t p n indType=oct dx=95u dy=95u w=3u n=3 s=2u tl=5u ts=5u octSym=1
+RI0 p n rm4 w=w l=0.01u
+.ENDS

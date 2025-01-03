@@ -1,0 +1,157 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Logging package.
+;; ---------
+;; $Header: /nfs/ch/disks/ch_ciaf_disk009/sync_vault/fdk71/server_vault/Projects/fdk71/dev/pck_dev_libs/utils/pck_collateral/core/skill/pckLogger.ils.rca 1.6 Tue Jul 26 14:41:24 2011 bramas2 Experimental $
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;In terms of verbosity : 
+;;debug is more verbose than info
+;;info is more verbose than warn
+;;warn is more verbose than error
+
+;;Use this for reporting non-recoverable issues.
+(defun pckError (source msg) (list source msg) nil)
+
+;;Register a warning. Use this to inform about coersion 
+;;of types; handling of expected corner cases etc.
+(defun pckWarn (source msg) (list source msg) nil)
+
+;;register information. Use this to log information 
+;;like function entry/exit; high level tracing etc.
+(defun pckInfo (source msg) (list source msg) nil)
+
+;;register debug. Use this to log information from
+;;inside a loop or other highly repetitive messages.
+(defun pckDebug (source msg) (list source msg) nil)
+
+;;Turn off all log messages from
+;;all sources EXCEPT for pckError
+(defun pckLogOff () nil)
+
+;;Turn on all messages
+(defun pckLogOn () nil)
+
+;;Query status of logging
+;;Returns t if logging is set to "ON"
+(defun pckIsLogOn () nil)
+
+;;Set all sources to a certain level
+(defun pckLogSetAll (level) (list level) nil)
+
+;;Set a certain source to a certain level
+(defun pckLogSet (source level) (list source level) nil)
+
+;;Set a different destination, in addition to
+;;standard output, for log messages.
+(defun pckLogAlsoTo (port) (list port) nil)
+
+;;Remove the additional destination for the log messages
+(defun pckLogStop (port) (list port) nil)
+
+;;dump config
+(defun pckDumpConfig (file) nil)
+
+;;implementation below.
+(let ((pck_ERROR 4)
+      (pck_WARN 3)
+      (pck_INFO 2)
+      (pck_DEBUG 1)
+      (port (list poport))
+      pck_LOG_CONTROL)
+
+  (printf "Initializing pck_LOG_CONTROL ...\n")
+  (setq pck_LOG_CONTROL (makeTable "Logging Control Table" nil))
+  (setarray pck_LOG_CONTROL "LOG_ON" t)
+  (printf "Done with pck_LOG_CONTROL initialization.\n")
+
+  (defun _pckDumpConfig (file)
+	(writeTable file pck_LOG_CONTROL))
+
+  (defun _pckLogOn ()
+    (setarray pck_LOG_CONTROL "LOG_ON" t))
+
+  (defun _pckIsLogOn ()
+    (if (pck_LOG_CONTROL["LOG_ON"])
+        t
+        nil))  
+  
+  (defun _pckLogOff ()
+    (setarray pck_LOG_CONTROL "LOG_ON" nil))
+
+  (defun _pckError (source msg)
+    (log (sprintf nil "-E- %s : %s \n" source msg)))
+
+  (defun _pckWarn (source msg)
+    (when (pck_LOG_CONTROL["LOG_ON"])
+	  (generic source pck_WARN "-W-" msg)))
+  
+  (defun _pckInfo (source msg)
+    (when (pck_LOG_CONTROL["LOG_ON"])
+	  (generic source pck_INFO "-I-" msg)))
+
+  (defun _pckDebug (source msg)
+    (when (pck_LOG_CONTROL["LOG_ON"])
+	  (generic source pck_DEBUG "-D-" msg)))
+
+  (defun _pckLogSetAll (level)
+    (let (l)
+    (case (upperCase level)
+      ("ERROR" (setq l pck_ERROR))
+      ("WARN" (setq l pck_WARN))
+      ("INFO" (setq l pck_INFO))
+      ("DEBUG" (setq l pck_DEBUG)))
+    (foreach s pck_LOG_CONTROL
+	     (setarray pck_LOG_CONTROL s l))))
+
+  (defun _pckLogSet (source level)
+    (let (l); yes I know it is repetitive
+      (case (upperCase level)
+	("ERROR" (setq l pck_ERROR))
+	("WARN" (setq l pck_WARN))
+	("INFO" (setq l pck_INFO))
+	("DEBUG" (setq l pck_DEBUG)))
+      (setarray pck_LOG_CONTROL source l)))
+
+  (defun _pckLogAlsoTo (p)
+    (setq port (cons p port)))
+
+  (defun _pckLogStop (p)
+  (let ()
+		(setq port (setof x port (nequal x p)))
+		(close p)
+  ))
+
+  (defun generic (source level prefix msg)
+    ;;if we don't know about source, register source @ DEBUG
+    (unless (pck_LOG_CONTROL[source])
+	    (setarray pck_LOG_CONTROL source pck_DEBUG))
+    ;;do we care about this level ?
+    (when (geqp level pck_LOG_CONTROL[source])
+	  (log (sprintf nil "%s %s (%s): %s \n" prefix source (getCurrentTime) msg))))
+
+
+  ;;for now just print; later on we might include file logging.
+  (defun log (str)
+    (foreach p port
+	     (fprintf p str)
+;;	     (drain p)
+	     )
+    t)
+
+  (setq pckLogOn _pckLogOn)
+  (setq pckIsLogOn _pckIsLogOn)
+  (setq pckLogOff _pckLogOff)
+  (setq pckError _pckError)
+  (setq pckWarn _pckWarn)
+  (setq pckInfo _pckInfo)
+  (setq pckDebug _pckDebug)
+  (setq pckLogSetAll _pckLogSetAll)
+  (setq pckLogSet _pckLogSet)
+  (setq pckLogAlsoTo _pckLogAlsoTo)
+  (setq pckLogStop _pckLogStop)
+  (setq pckDumpConfig _pckDumpConfig)
+  );let
+  
+
+  
+

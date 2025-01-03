@@ -1,0 +1,8 @@
+#
+if ($?FDK_OA64) then
+    setenv CDS_AUTO_64BIT ALL
+endif
+
+modpath -n 1 -v LD_LIBRARY_PATH /p/foundry/eda/em64t_SLES10/virtuoso/6.15.510/oa_v22.41.021/lib/linux_rhel40_gcc44x_64/opt
+modpath -n 1 -v LD_LIBRARY_PATH /nfs/ch/disks/ch_ciaf_disk046/designsync/sync_client/V6R2010x.HF1/syncinc/cds/lib/Linux/64bit
+modpath -n 1 -v LD_LIBRARY_PATH /nfs/ch/disks/ch_ciaf_disk046/designsync/sync_client/V6R2010x.HF1/syncinc/cds/lib/Linux

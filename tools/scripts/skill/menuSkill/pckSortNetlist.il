@@ -1,0 +1,60 @@
+;;
+;; (load (strcat PCK_SKILL_DIR "/1271/utils/pckSortNetlist.il"))
+;;
+(defun pckReadCDLFile (fn fo)
+  (let  (i inport outport (mdStart 0) (mdEnd 0) header sub_blocks)
+	(setq inport (infile fn))
+	(setq sub_blocks (list))
+	(when inport
+	  (while (gets nl inport)
+		;;(println nl)
+		(cond
+			  ((rexMatchp "Library Name:" nl)
+			   (setq libName (car (last (parseString nl))))
+			   (fprintf stdout "Found start of Library section section %s!\n" libName)
+			   (fprintf stdout "-D- >>> %s" nl)
+			   (sprintf subckt "************************************************************************\n")
+			   (setq mdStart 1)
+			   )
+			  ((rexMatchp ".ENDS" nl)
+			   (fprintf stdout "Found the end of subcircuit definition!\n")
+			   (fprintf stdout "-D- >>> %s" nl)
+			   (setq mdEnd 1)
+			   )
+			  ((rexMatchp "Cell Name:" nl)
+			   (setq cellname (car (last (parseString nl))))
+			   (fprintf stdout "Found cell name - %s!\n" cellname)
+			   (fprintf stdout "-D- >>> %s" nl)
+			   )
+			  (t
+			   (fprintf stdout "-D- >>> %s" nl)
+			   ;; do nothing
+			   ))
+		(cond
+		 ((and
+		   (equal mdStart 1)
+		   (equal mdEnd 0))
+		  (sprintf subckt "%s%s" subckt nl))
+		 ((equal mdEnd 1)
+		  (sprintf subckt "%s%s\n" subckt nl)
+		  (setq mdStart 0)
+		  (setq mdEnd 0)
+		  ;;(putpropq sub_blocks subckt cellname )
+		  (setq sub_blocks (cons (list cellname subckt) sub_blocks))
+		  (fprintf stdout "Added definiton of %s to blocks\n" cellname)
+		  )
+		 (t
+		  (fprintf stdout "skipping line >>> %s\n" nl)
+		  )
+		 )
+		)
+	  (close inport)
+	  )
+	(setq sub_blocks (sortcar sub_blocks nil))
+	(setq outport (outfile fo "w"))
+	(foreach elem sub_blocks
+			 (fprintf outport "%s\n" (cadr elem)))
+	(close outport)
+	sub_blocks
+	)
+  )

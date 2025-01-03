@@ -1,0 +1,221 @@
+/*
+load("/nfs/ch/disks/ch_ciaf_disk023/fdk_gwa_disk003/jmarulan/fdk71/work/scalable/frontEnd/ocean/ICFsplineErrorTb.ocn")
+*/
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+/*---------------------------------------------------------------------------
+ Ocean Script: ICFsplineErrorTb.ocn
+ Created by Mauricio Marulanda
+ Purpose: Runs the testbench in the cell "splineErrorTb" in your work library "<user>_p<dot#>"
+          The testbench must have already been created and the instances are name specific to: vdc for voltage frequency sweep
+	  and Rsymb2 & Rspar2 to take the measurements.
+ ---------------------------------------------------------------------------*/
+
+let( (tStart userName envParams modelFile listOfFiles cellId twoPi simName ReZspar ImZspar FreqSpar peakFreqSpar LpeakSpar QpeakSpar ReZind ImZind 
+      Freq peakFreq Lpeak Qpeak dotNum topMetal skewStr skewNum (portOutLowq nil) (portOutTypq nil) (portOutHighq nil) computeDelta computeAreaNorm  getSplineSymbFQL
+      N S W D deltaVals deltaSplineSymbVals simVals sparVals splineSymbVals sparamFileName printToFile areaNorm attachFileList tempVal (outputDir nil)
+      QdWave LdWave QdWaveSpar LdWaveSpar printGraph (enableGraphPrint nil) (plottingWin nil)
+      ;;; hardcoded below
+      libName cellName viewName splineSymbol sparamFilesPath maxFreq)
+      
+;; Start timer
+  tStart=getCurrentTime()
+
+;; load the needed skill procedures
+load( strcat(getShellEnvVar("FDK_WORK") "/.cdsinit") )
+
+;--------------------------------------------------------------------------- 
+;--------------------------------------------------------------------------- 
+;; hard coded parameters especially regarding the test bench library and cell
+;--------------------------------------------------------------------------- 
+  dotNum = getShellEnvVar("FDK_DOTPROC")
+  userName = getShellEnvVar("USER")
+  libName = strcat(userName "_p" dotNum)
+  cellName = "splineErrorTb"
+  viewName = "schematicTemp"
+  splineSymbol = "ind3pScalable"
+ ; sparamFilesPath = "/nfs/ch/disks/ch_ciaf_disk023/fdk_gwa_disk003/jmarulan/fdk71/work/scalable/testCases/sparamLibTC/s3p"
+  sparamFilesPath = "/nfs/ch/disks/ch_ciaf_disk023/fdk_gwa_disk003/jmarulan/fdk71/work/scalable/sparamLib/s3p"
+  modelFile = "/nfs/ch/disks/ch_ciaf_disk023/fdk_gwa_disk003/jmarulan/fdk71/work/scalable/frontEnd/models/scalableInd.scs" 
+  maxFreq = "65G"
+  enableGraphPrint = t ; to print the waveforms in files in the output directory
+;--------------------------------------------------------------------------- 
+;--------------------------------------------------------------------------- 
+
+;; useful functions
+computeDelta = lambda((orig new) float(orig-new)/orig*100)
+computeAreaNorm = lambda( (Nval Sval Wval Dval) let( ((areaH 0) (areaV 0))
+		    Nval=cdfParseFloatString(Nval) Sval=cdfParseFloatString(Sval) Wval=cdfParseFloatString(Wval) Dval=cdfParseFloatString(Dval)
+		    for( Nii 1 fix(Nval)
+		      areaH = areaH + (Dval - 2*(Nii-1)*Sval)*Wval
+		      areaV = areaV + (Dval - 2*Nii*Wval - 2*(Nii-1)*Sval)*Wval )
+		    Dval*Dval / (areaH + areaV) ) ) ;return value
+getSplineSymbFQL = lambda( (mycdfgData skewGiven) 
+                     let( ( tempParamId (splineVals list()) )
+     	               foreach(splineVal list("FreqPeak" "QdPeak" "LdPeak")
+	                 tempParamId = cdfFindParamByName(mycdfgData strcat(lowerCase(skewGiven) splineVal) )
+ 	                 splineVals = append1(splineVals cdfParseFloatString(get(tempParamId "value")) )
+	               ) ;foreach
+		     splineVals ) ; return value and let
+		   ) ; lambda
+		     
+printToFile = lambda( (portOut outputDirVal dotNumVal topMetalVal skewStrVal sparamFileNameVal ; prints up to five lists with a separator
+ 		       @optional (list1 list()) (list2 list()) (list3 list()) (list4 list()) (list5 list()) (list6 list()) (list7 list()) ) 
+               let( ( tempData (outputListVals list()) (separatorStr " "))
+	         list1 list2 list3 list4 list5 list6 list7
+   	         unless(portOut
+ 		   portOut = outfile( strcat(outputDirVal "/" "b8" dotNumVal "ind" topMetalVal skewStrVal "TbResultsLog.csv") )
+ 		   fprintf(portOut "%s" "Note: All Deltas are computed at the peaking Qdiff,,,,,,,,,,,,\
+RLCK Simulation,,,,,Sparam Simulation,,,,,Spline Symbol Simulation,,,,Spline Symbol Deltas to RLCK Simualtions\n\
+InductorName,Freq Delta,Qdiff Delta,Ldiff Delta,Qse Delta, ,N,S,W,D,AreaNormalized, ,\
+PeakFreq,PeakQd,PeakLd,PeakQse, ,PeakFreqSpar,PeakQdSpar,PeakLdSpar,PeakQseSpar, ,PeakFreqSplineSymb,PeakQdSplineSymb,PeakLdSplineSymb, ,\
+FreqSymbSpline Delta,QdSymbSpline Delta,LdSymbSpline Delta\n")
+	     	 ) ; unless
+		 ;; compile all the given lists into one with the separators
+		 for(ii 1 7
+		   when(tempData = symeval(stringToSymbol(strcat("list" ICFnum2str(ii))))
+                   outputListVals = append(outputListVals append1(tempData separatorStr)) ) ; when
+		 ) ; for
+  	         fprintf(portOut "%s," sparamFileNameVal)
+                 fprintf(portOut "%s\n" buildString(mapcar('ICFnum2str outputListVals) ",") )
+                 portOut ) ; let and return value
+	         ) ; lambda
+
+printGraph = lambda( ( plottingWinVal outputDirVal sparamFileNameVal QdWaveVal LdWaveVal QdWaveSparVal LdWaveSparVal)
+	       let( (windowPlot)
+		 unless(isDir(outputDirVal) outputDirVal = ICFmakeDir(outputDirVal)) ; unless
+ 		 hardCopyOptions(?hcOutputFile strcat(outputDirVal "/" sparamFileNameVal ".png"))
+    	         awvClearPlotWindow(plottingWinVal)
+		 awvGetCurrentWindow(plottingWinVal)
+		 plot(QdWaveVal QdWaveSparVal LdWaveVal LdWaveSparVal ?expr list("QdCkt" "QdSpar" "LdCkt" "LdSpar") ?strip list(1 1 2 2))
+
+                 hardCopy(plottingWinVal) ) ;let
+	      ) ;lambda	     	 
+;--------------------------------------------------------------------------- 
+testing = t
+;; get the Id of the Schematic
+  cellId = dbOpenCellViewByType(libName cellName viewName "schematic" "a")
+  when(cellId~>mode == "a"  ;only go if the schematic is free and ready to append
+;; get list of files for the loop
+    listOfFiles = getDirFiles(sparamFilesPath) 
+;; uncomment for testing a few   ;;listOfFiles = list("b89indm10lowQ__2N_0.4S_4W_85D_1.4Y.s3p" "b89indm10lowQ__2N_0.4S_4W_90D_1.4Y.s3p");"b89indm10lowQ__3N_0.2S_5W_65D_1.4Y.s3p" "b89indm10typQ__2N_0.2S_5W_65D_1.4Y.s3p" "b89indm10highQ__2N_0.2S_5W_65D_1.4Y.s3p")
+    foreach(iiFile listOfFiles
+      sparamFileName = buildString(reverse(cdr(reverse(parseString(iiFile ".")))) ".")
+      envParams = ICFchangeCDFIndTb(cellId strcat(sparamFilesPath "/" iiFile) ) ; a list is return
+      when(car(envParams)
+ 	topMetal = cadr(envParams)  skewStr = caddr(envParams)
+ 	skewNum = ( lambda( (skewVal) case(lowerCase(skewVal) ("lowq" 0) ("typq" 1) ("highq" 2)))   skewStr )
+ 	N = nth(3 envParams)  S = nth(4 envParams)  W = nth(5 envParams)  D = nth(6 envParams)  areaNorm = apply(computeAreaNorm list(N S W D))
+
+;; initialize the results
+         simVals = list()  sparVals = list()  deltaVals = list() deltaSplineSymbVals = list()
+;; run ocean twice for the differential ended and single ended configurations
+ when(testing
+    	  foreach( iiRgnd list(100M 1m)
+  	  simName = simulator( 'spectre )
+  	  design(libName cellName viewName)
+  	  resultsDir( strcat("/tmp/jmarulan_simulations/" cellName "/" simName) )
+
+  	  ; model file to read the inductor netlist
+  	  modelFile( list(modelFile "") )
+
+  	  ;analysis and design variable
+  	  analysis('ac ?start "0.5G"  ?stop maxFreq  ?step "0.5G")
+  	  desVar("Vdiff" 1)
+  	  desVar("Rgnd" iiRgnd)
+  	  desVar("inductorSkew" skewNum)
+  	  envOption('analysisOrder  list("ac") )
+  	  saveOption('useprobes "yes")
+  	  saveOption('currents "all")
+  	  temp( (lambda( (skewGiven) case(lowerCase(skewGiven) ("lowq" 110) ("typq" 25) ("highq" -40))) skewStr) )
+  	  run()
+;;;;;;;;;;;;;;;;;;;;;
+;do the calculations;;; BTW PLOT example -->>> Q = (ImZind / ReZind) plot(Q ?expr '("Q") )
+;;;;;;;;;;;;;;;;;;;;;
+  	  defMathConstants('mathConst)
+  	  twoPi = 2*mathConst.PI
+
+  	 ;; for the sparameter box
+  	  ReZspar = real((-1 / IF("/Rspar2/PLUS")))
+  	  ImZspar = imag((-1 / IF("/Rspar2/PLUS")))
+  	  FreqSpar = xval(imag(IF("/Rspar2/PLUS")))
+  	  peakFreqSpar = xmax((ImZspar / ReZspar))
+  	  LpeakSpar = value((ImZspar / twoPi / FreqSpar) peakFreqSpar)
+  	  QpeakSpar = ymax((ImZspar / ReZspar))
+
+  	 ;; for the prim symbol
+  	  ReZind = real((-1 / IF("/Rsymb2/PLUS")))
+  	  ImZind = imag((-1 / IF("/Rsymb2/PLUS")))
+  	  Freq = xval(imag(IF("/Rsymb2/PLUS")))
+  	  peakFreq = xmax((ImZind / ReZind))
+  	  Lpeak = value((ImZind / twoPi / Freq) peakFreq)
+  	  Qpeak = ymax((ImZind / ReZind))
+
+  	 ;; Calculate the deltas for differential case and single ended --Make sure the number matches the foreach(Rgnd above
+  	  if(iiRgnd != 1m then
+	    simVals  = append(simVals  list(peakFreq*1e-9 Qpeak Lpeak*1e9))
+	    sparVals = append(sparVals list(peakFreqSpar*1e-9 QpeakSpar LpeakSpar*1e9))
+  	  else
+	    simVals = append(simVals list(Qpeak))
+    	    sparVals = append(sparVals list(QpeakSpar))
+	    QdWave = ImZind / ReZind	      QdWaveSpar = ImZspar / ReZspar
+	    LdWave = ImZind / twoPi / Freq    LdWaveSpar = ImZspar / twoPi / Freq
+  	  ) ; if
+        ) ; foreach(iiRgnd --> differential and single ended cases
+testing = nil
+)
+;; calculate the deltas and the splineSymbVals
+        splineSymbVals = apply(getSplineSymbFQL list(ICFgetInstanceCDF(cellId splineSymbol) skewStr))
+        deltaVals = mapcar(computeDelta sparVals simVals)
+	deltaVals = mapcar( '(lambda( (percentageGiven) sprintf(nil "%s%s" ICFnum2str(percentageGiven) "%")) ) deltaVals)
+        deltaSplineSymbVals = mapcar(computeDelta reverse(cdr(reverse(simVals))) splineSymbVals )
+	deltaSplineSymbVals = mapcar( '(lambda( (percentageValGiven) sprintf(nil "%s%s" ICFnum2str(percentageValGiven) "%")) ) deltaSplineSymbVals)
+
+;; create output Directory if it does not exist
+        unless(outputDir
+	  rexCompile("[: ]") tempVal = rexReplace(tStart "" 1) tempVal = rexReplace(tempVal "_" 1)
+          outputDir = ICFmakeDir(strcat( getShellEnvVar("FDK_WORK") "/splineErrorTbOutput_" rexReplace(tempVal "." -1))  )        
+	); unless(outputDir   
+
+;; print to the output file	
+	tempVal = list(outputDir dotNum topMetal skewStr sparamFileName deltaVals list(N S W D areaNorm) simVals sparVals splineSymbVals deltaSplineSymbVals)
+	case(lowerCase(skewStr)
+ 	  ("lowq"  portOutLowq  = apply(printToFile  append(list(portOutLowq)   tempVal)))
+ 	  ("typq"  portOutTypq  = apply(printToFile  append(list(portOutTypq)   tempVal)))
+ 	  ("highq" portOutHighq = apply(printToFile  append(list(portOutHighq)  tempVal)))
+ 	) ; case
+
+;; hardcopy the graph of the differential
+	when( enableGraphPrint 
+	  unless(plottingWin plottingWindow = awvCreatePlotWindow() ) ; unless
+	  apply(printGraph list( plottingWin strcat(outputDir "/listGraphs") sparamFileName QdWave LdWave QdWaveSpar LdWaveSpar) ) ); when
+
+      ) ; when(car(envParams
+    ) ; foreach (iiCase
+
+;; close the output files and windows
+    attachFileList = list()
+    foreach( iiPortOut list(portOutLowq portOutTypq portOutHighq)
+      when(iiPortOut
+  	attachFileList = append1(attachFileList strcat("-a " get_filename(iiPortOut)) )
+  	close(iiPortOut)
+      ) ; when
+    ) ;foreach
+    when(plottingWin awvCloseWindow(plottingWin)) ; when
+  ) ; when(cellId~>mode == "a"
+;; e-mail the user when finished
+  if(attachFileList then
+    tempVal = strcat("echo \"Simulation triggered on " tStart sprintf(nil " and lasted %.0f minute(s)." compareTime(getCurrentTime() tStart)/60.0 )
+                     "\n\nRegards,\n\nMauricio Marulanda, phD\" | mail -s \"Simulation finished successfully\"" " " buildString(attachFileList) " " userName " &")
+    system(tempVal)
+  else
+    tempVal = strcat("echo \"Simulation triggered on " tStart sprintf(nil ". The symbol parameter were %L." envParams)
+                     "\n\nRegards,\n\nMauricio Marulanda, phD\" | mail -s \"Simulation FAILED\" " userName " &")
+    system(tempVal)
+  ) ; if
+) ; let
+
+; Clean Simulation and Results directories
+ocnResetResults()
+ocnCloseSession()

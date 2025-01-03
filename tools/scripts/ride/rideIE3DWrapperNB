@@ -1,0 +1,17 @@
+#!/bin/sh
+
+## send the job to the batch
+parameters="start_app ie3dLocalDistSim.sh $1"
+temp=`nbq -P ch_vp -C SLES11_EM64T_8G -Q /ciaf/pck_max $parameters`
+nbPid=`expr "$temp" : ".*[jJ][oO][bB][iI][dD] *\([0-9]*\).*"`
+
+## wait for the job to finish inside the batch
+pollWait=300 # wait 300 seconds before each netbatch check
+waitStr="\(Wait\|Run\|Send\)"
+temp=`nbqstat -P ch_vp "jobid=${nbPid}" | grep "${waitStr} *${nbPid}"`
+while [ "$temp" != "" ]  
+do
+  sleep $pollWait
+  temp=`nbqstat -P ch_vp "jobid=${nbPid}" | grep "${waitStr} *${nbPid}"`
+done
+exit 0

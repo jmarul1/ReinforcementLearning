@@ -1,0 +1,198 @@
+/*
+##############################################################################
+# Intel Top Secret                                                           #
+##############################################################################
+# Copyright (C) 2013, Intel Corporation.  All rights reserved.               #
+#                                                                            #
+# This is the property of Intel Corporation and may only be utilized         #
+# pursuant to a written Restricted Use Nondisclosure Agreement               #
+# with Intel Corporation.  It may not be used, reproduced, or                #
+# disclosed to others except in accordance with the terms and                #
+# conditions of such agreement.                                              #
+#                                                                            #
+# All products, processes, computer systems, dates, and figures              #
+# specified are preliminary based on current expectations, and are           #
+# subject to change without notice.                                          #
+##############################################################################
+#
+# Author:
+#   Mauricio Marulanda
+
+load("/p/fdk/gwa/jmarulan/fdk73/work/utils/scripts/ocean/fdkRunIndSimQa.ocn")
+*/
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+/*---------------------------------------------------------------------------
+ Ocean Script: fdkRunIndSimQa
+ Created by Mauricio Marulanda
+ Purpose: Runs the testbench in the cell "d8#inductors_sim" in your work library "<user>_p<dot#>"
+          The testbench must have already been created and the instances are name specific to: vdc for voltage frequency sweep
+	  and Rsymb2 & Rspar2 to take the measurements.
+	  The OUTPUT Directory is the current Dir where the ocean script is run.
+ ---------------------------------------------------------------------------*/
+
+let( (tStart userName modelFileName modelWFileName cellId twoPi ReZind ImZind Freq peakFreq Lpeak Qpeak dotNum 
+      computeDelta (portOutAll nil) (portOutLowq nil) (portOutTypq nil) (portOutHighq nil)
+      simVals printToFile attachFileList tempVal (outputDir nil)
+      QdWave LdWave printGraph (enableGraphPrint nil) (plottingWin nil) closeAXLWindow SRF )
+      
+;; Start timer
+  tStart=getCurrentTime() 
+
+;; load the needed skill procedures
+  load( strcat(getShellEnvVar("FDK_WORK") "/.cdsinit") )
+
+;--------------------------------------------------------------------------- 
+;--------------------------------------------------------------------------- 
+;; hard coded parameters especially regarding the test bench library and cell and the simulator
+;--------------------------------------------------------------------------- 
+  dotNum = getShellEnvVar("FDK_DOTPROC")
+  userName = getShellEnvVar("USER")
+  when(null(libName) libName = strcat(userName "_p" dotNum))
+  when(null(cellName) cellName = strcat("d8" dotNum "inductorsqa_sim"))
+  when(null(viewName) viewName = "schematic")
+  when(null(simName) simName = simulator('spectre)) 
+  when(null(maxFreq) maxFreq = "65G")
+  enableGraphPrint = nil ; to print the waveforms in files in the output directory
+;--------------------------------------------------------------------------- 
+;--------------------------------------------------------------------------- 
+
+;; useful functions
+computeDelta = lambda((orig new) float(orig-new)/orig*100) computeDelta
+printToFile = lambda( (portOut outputDirVal dotNumVal skewStrVal fileNameVal; prints up to seven lists with a separator
+ 		       @optional (list1 list()) (list2 list()) (list3 list()) (list4 list()) (list5 list()) (list6 list()) (list7 list()) ) 
+               let( (tempData (outputListVals list()) (separatorStr " "))
+                 list1 list2 list3 list4 list5 list6 list7 ; skill lint friendly
+   	         unless(portOut
+ 		   portOut = outfile( strcat(outputDirVal "/" "d8" dotNumVal "ind" skewStrVal "ResultsLog.csv") )
+ 		   fprintf(portOut "%s" "InductorName,PeakFreq,PeakQd,PeakLd,PeakQse\n")
+	     	 ) ; unless
+	       ;; compile all the given lists into one with the separators
+		 for(ii 1 7
+		   when(tempData = symeval(stringToSymbol(strcat("list" ICFnum2str(ii))))
+                   outputListVals = append(outputListVals append1(tempData separatorStr)) ) ; when
+		 ) ; for
+                 fprintf(portOut "%s," fileNameVal)
+		 fprintf(portOut "%s\n" buildString(mapcar('ICFnum2str outputListVals) ",") )
+                 portOut ) ; let and return value
+	         ) ; lambda
+
+printGraph = lambda( ( plottingWinVal outputDirVal fileNameVal SRFVal yAxisLimits QdWaveVal LdWaveVal)
+	       unless(isDir(outputDirVal) outputDirVal = ICFmakeDir(outputDirVal)) ; unless
+ 	       hardCopyOptions(?hcOutputFile strcat(outputDirVal "/" fileNameVal ".png"))
+ 	       awvClearPlotWindow(plottingWinVal)
+	       awvSetXAxisLabel(plottingWinVal "Freq (GHz)")
+	       awvSetCurrentWindow(plottingWinVal)
+	       addSubwindowTitle(fileNameVal)
+	       plot(QdWaveVal LdWaveVal ?expr list("QdCkt" "LdCkt") ?strip list(1 2))
+	       awvSetXLimit(plottingWinVal list(0 1.1*SRFVal))
+	       awvSetYLimit(plottingWinVal 1 list(0 1.1*nth(0 yAxisLimits)) ?stripNumber 1) ; for the Q
+	       awvSetYLimit(plottingWinVal 1 list(0 1.1*nth(1 yAxisLimits)) ?stripNumber 2) ; for the L
+ 	       hardCopy(plottingWinVal) 
+	       ) ;lambda
+;---------------------------------------------------------------------------
+
+;; get the Id of the Schematic
+  cellId = dbOpenCellViewByType(libName cellName viewName "schematic" "r")
+  when(cellId  ;only go if the schematic is open
+    foreach(iiSkew list("lowQ" "typQ" "highQ")
+;; initialize the results
+      simVals = list()
+;; run ocean twice for the differential ended and single ended configurations
+      foreach( iiRgnd list(100e6 1m)
+        case(simName
+	  (spectre	simName=simulator('spectre)	analysis('ac ?start "0.5G"  ?stop maxFreq  ?step "0.5G")  option('GMIN  "1e-18")
+	                modelWFileName = strcat(getShellEnvVar("FDK_INST_DIR") "/models/" simName "/core/latest/" "intel73indwrapper.scs")
+			modelFileName = strcat(getShellEnvVar("FDK_INST_DIR") "/models/" simName "/core/latest/" "intel73custom.scs")
+			envOption('analysisOrder  list("ac") ) 
+			saveOption('useprobes "yes")
+  	                saveOption('currents "all")
+          )
+	  (hspiceD	simName = simulator('hspiceD)	analysis('ac ?sweepType "linear"  ?numPoints ICFnum2str(int(cdfParseFloatString(maxFreq)/0.5G)) ?fstart "0.5G" ?fstop maxFreq)
+			modelWFileName = strcat(getShellEnvVar("FDK_INST_DIR") "/models/" car(parseString(simName "D")) "/core/latest/" "intel73indwrapper.hsp")
+			modelFileName = strcat(getShellEnvVar("FDK_INST_DIR") "/models/" car(parseString(simName "D")) "/core/latest/" "intel73custom.hsp")
+			save('i "/Rsymb2/PLUS" "/Rspar2/PLUS") )  
+	) ; case(simName
+	
+        modelFile( list(modelWFileName iiSkew) list(modelFileName nil) )  	                  ; model files
+	design(libName cellName viewName)
+  	resultsDir( strcat("/tmp/jmarulan_simulations/" cellName "/" simName) )
+  	desVar("Vdiff" 1)
+  	desVar("Rgnd" iiRgnd)
+  	temp( (lambda( (skewGiven) case(lowerCase(skewGiven) ("lowq" 125) ("typq" 25) ("highq" -40))) iiSkew) )
+	run()  
+;;;;;;;;;;;;;;;;;;;;;
+;do the calculations;;; BTW PLOT example -->>> Q = (ImZind / ReZind) plot(Q ?expr '("Q") )
+;;;;;;;;;;;;;;;;;;;;;
+  	defMathConstants('mathConst)
+  	twoPi = 2*mathConst.PI
+  	ReZind = real((-1 / IF("/Rsymb2/PLUS")))
+  	ImZind = imag((-1 / IF("/Rsymb2/PLUS")))
+  	Freq = xval(imag(IF("/Rsymb2/PLUS")))
+  	peakFreq = xmax((ImZind / ReZind))
+  	Lpeak = value((ImZind / twoPi / Freq) peakFreq)
+  	Qpeak = ymax((ImZind / ReZind))
+  	if(iiRgnd != 1m then
+	  simVals  = append(simVals  list(peakFreq*1e-9 Qpeak Lpeak*1e9))
+  	else
+	  simVals = append(simVals list(Qpeak))
+	  QdWave = ImZind / ReZind	      
+	  LdWave = ImZind / twoPi / Freq    
+	  SRF = ICFgetIndSRF(QdWave)
+	  unless(SRF SRF = cdfParseFloatString(maxFreq) println("WARNING: SRF not achieve in one simulation"))
+  	) ; if
+      ) ; foreach(iiRgnd --> differential and single ended cases
+
+;; create output Directory if it does not exist
+      unless(outputDir
+	rexCompile("[: ]") tempVal = rexReplace(tStart "" 1) tempVal = rexReplace(tempVal "_" 1)
+        outputDir = ICFmakeDir(strcat( getShellEnvVar("FDK_WORK") "/inductorSimQaOutput_" rexReplace(tempVal "." -1))  )        
+      ); unless(outputDir   
+
+;; print to the output file	
+      tempVal = list(outputDir dotNum "peak" iiSkew simVals)
+      portOutAll = apply(printToFile  append(list(portOutAll)   tempVal))
+ ;     case(lowerCase(iiSkew)
+ ;	("lowq"  portOutLowq  = apply(printToFile  append(list(portOutLowq)   tempVal)))
+ ;	("typq"  portOutTypq  = apply(printToFile  append(list(portOutTypq)   tempVal)))
+ ;	("highq" portOutHighq = apply(printToFile  append(list(portOutHighq)  tempVal)))
+ ;     ) ; case
+
+;; hardcopy the graph of the differential
+      when( enableGraphPrint 
+	unless(plottingWin plottingWin = awvCreatePlotWindow() ) ; unless
+	apply(printGraph list(plottingWin strcat(outputDir "/listGraphs") strcat(cellName "_" iiSkew) SRF list(Qpeak ymax(LdWave)) QdWave LdWave) ) ); when
+  ) ; foreach (iiCase
+
+;; close the output files and windows
+    attachFileList = list()
+    foreach( iiPortOut list(portOut portOutLowq portOutTypq portOutHighq)
+      when(iiPortOut
+  	attachFileList = append1(attachFileList strcat("-a " get_filename(iiPortOut)) )
+  	close(iiPortOut)
+      ) ; when
+    ) ;foreach
+    when(plottingWin 
+      awvCloseWindow(plottingWin) 
+      tempVal = setof(x hiGetWindowList('session) pcreMatchp("Visualization & Analysis XL" hiGetWindowName(x)) )
+      closeAXLWindow = lambda( (x) when(windowp(x) hiCloseWindow(x)))
+      mapcar(closeAXLWindow tempVal) 
+    ) ; when
+    when(cellId dbClose(cellId)) ; when
+  ) ; when(cellId~>mode == "a"
+;; e-mail the user when finished
+  if(attachFileList then
+    tempVal = strcat("echo \"Simulation triggered on " tStart sprintf(nil " and lasted %.0f minute(s)." compareTime(getCurrentTime() tStart)/60.0 )
+                     "\n\nRegards,\n\nMauricio Marulanda, phD\" | mail -s \"Simulation finished successfully\"" " " buildString(attachFileList) " " userName " &")
+    ;system(tempVal)
+  else
+    tempVal = strcat("echo \"Simulation triggered on " tStart
+                     "\n\nRegards,\n\nMauricio Marulanda, phD\" | mail -s \"Simulation FAILED\" " userName " &")
+    system(tempVal)
+  ) ; if
+
+) ; let
+
+; Clean Simulation and Results directories
+ocnResetResults()
+ocnCloseSession()

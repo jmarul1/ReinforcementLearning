@@ -1,0 +1,12 @@
+2
+keyed
+<Name><State><Vault><Branch><Version><DateFetched><Log><Conflict><StickyTag><MergedFrom>
+<fdkPycell_mimcap_scl.py><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkPycell_mimcap_scl.py;><1><1.10><1444945326><><F><><><Size=41478><Checksum=26f83cbd><vctime=1444945327>
+<fdkCdf_mimcap_scl.cdf><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkCdf_mimcap_scl.cdf;><1><1.20><1440521788><><F><><><Size=10672><Checksum=c3e666c7><vctime=1440521789>
+<fdkPcell_mimcap_scl.pc><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkPcell_mimcap_scl.pc;><1><1.5><1412180231><><F><><><Size=2752><Checksum=77bc2ed9><vctime=1412188675>
+<fdkCdf_mimcap_sclCB.il><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkCdf_mimcap_sclCB.il;><1><1.30><1439429306><><F><><><Size=9609><Checksum=46f08f8f><vctime=1439429307>
+<mimcap_scl.csv><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/mimcap_scl.csv;><1><1.27><1452030807><><F><><><Size=5077><Checksum=db0f6b3e><vctime=1452030808>
+<fdkPcell_mimcap_sclCB.il><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkPcell_mimcap_sclCB.il;><1><1.20><1440613794><><F><><><Size=15332><Checksum=9af8777f><vctime=1440613795>
+<fdkCdf_mimcap_sclCB.tcl><F><sync://fdk73.sync.intel.com:1400/Projects/fdk73/oalibs/common/custom/package/mimcap_scl/fdkCdf_mimcap_sclCB.tcl;><1><1.6><1415837119><><F><><><Size=8929><Checksum=77610287><vctime=1415840888>
+
+

@@ -1,0 +1,176 @@
+procedure(intel22XfmrPCellCoreHyp4()
+let( ()
+
+;; LAYOUT BUILD
+  procedure( buildXfmr(cv priCoil secCoil wM8 wM7 doM8 doM7 tl ts indType fill ext)
+  let( ( points transf main test)
+    main = list(list("topLayer" "string" priCoil) list("dx" "string" convertToMicronStr(doM8*1M)) list("dy" "string" convertToMicronStr(doM8*1M)) list("w" "string" convertToMicronStr(wM8*1M)) 
+                list("tl" "string" convertToMicronStr(tl*1M)) list("ts" "string" convertToMicronStr(ts*1M)) list("indType" "string" indType) list("fill" "boolean" nil))
+    test = dbCreateParamInstByMasterName(cv cv~>libName "mmind3t" "layout" "primary" 0:0 "R0" 1 main)    
+    runCallbacks(test)
+    dbFlattenInst(test 1 t)
+    main = list(list("topLayer" "string" secCoil) list("dx" "string" convertToMicronStr(doM7*1M)) list("dy" "string" convertToMicronStr(doM7*1M)) list("w" "string" convertToMicronStr(wM7*1M))
+                list("tl" "string" convertToMicronStr(tl*1M)) list("ts" "string" convertToMicronStr(ts*1M)) list("indType" "string" indType) list("fill" "boolean" nil) )    
+    transf = 0:1M*(doM7+tl)+1M*(tl+doM8/2-doM7/2)    
+    test = dbCreateParamInstByMasterName(cv cv~>libName "mmind3t" "layout" "secondary" transf "MX" 1 main)
+    runCallbacks(test)
+    dbFlattenInst(test 1 t)
+    fixPins(cv)
+    when(fill 
+      ext = ext*1M
+      test = list(rodAddPoints(car(cv~>bBox) -ext:-ext) rodAddPoints(cadr(cv~>bBox) ext:ext))
+      fillM7M8(cv test))    
+t  ));let;proc
+
+  procedure(runCallbacks(inst) 
+    foreach(ii cdfGetInstCDF(inst)~>parameters 
+      when(ii~>callback apply(get(intel22IndPCellCore() 'fixIndParamsCB) list(ii~>name cdfGetInstCDF(inst)))) )
+  );let;proc 
+  procedure(convertToMicronStr(number) strcat(numToStr(number) "u") )
+  
+  procedure(fixPins(cv)
+  let( (pinName jj hPin)
+    pinNames = list("p1" "n1" "ct1" "p2" "n2" "ct2") jj=0 hPin=0.5 lpps=list(list("m8" "pin") list("m7" "pin"))
+    mapc('dbDeleteObject setof(ii cv~>shapes ii~>objType == "label"))  
+    foreach(lpp lpps
+      foreach(ii setof(ii cv~>shapes ii~>lpp==lpp)
+        net = dbCreateNet(cv nth(jj pinNames))        ;create the nets
+        dbCreateLabel(cv lpp centerBox(ii~>bBox) nth(jj pinNames) "centerCenter" "R0" "stick" hPin)       ;create the labels
+        dbCreatePin(net ii) jj+=1 )) ;create the pin
+  ))
+
+;;; CDF Callbacks
+  procedure(fixXfmrParamsCB(whoCalled cdfId)
+  let( (w dx dy tl ts ext cdfP stop result result2 fpath minV maxV ports)
+    ; convert to number and to microns
+    wM8  = aelEval(cdfId~>wM8~>value ?default cdfParseFloatString(cdfId~>wM8~>defValue))*1e6 
+    wM7  = aelEval(cdfId~>wM7~>value ?default cdfParseFloatString(cdfId~>wM7~>defValue))*1e6     
+    doM8 = aelEval(cdfId~>doM8~>value ?default cdfParseFloatString(cdfId~>doM8~>defValue))*1e6 
+    doM7 = aelEval(cdfId~>doM7~>value ?default cdfParseFloatString(cdfId~>doM7~>defValue))*1e6     
+    tl = aelEval(cdfId~>tl~>value ?default cdfParseFloatString(cdfId~>tl~>defValue))*1e6 
+    ts = aelEval(cdfId~>ts~>value ?default cdfParseFloatString(cdfId~>ts~>defValue))*1e6       
+    ext = aelEval(cdfId~>ext~>value ?default cdfParseFloatString(cdfId~>ext~>defValue))*1e6       
+    stop = nil
+    ; find who call and correct
+      case(whoCalled
+      ("wM8"  minV = 2.001 
+            if(cdfId~>indType~>value=="oct" then side=min(doM8 doM8)/(2**0.5+1)/2**0.5 maxV = min(25 side) ;oct
+	    else maxV = min(25 doM8/2-1 doM8/2-1 doM8/2-ts/2) ) ;rec
+            result = aelEval(wM8 ?minimum minV ?maximum maxV)   wM8=result )
+      ("wM7"  minV = 0.54
+            if(cdfId~>indType~>value=="oct" then side=min(doM7 doM7)/(2**0.5+1)/2**0.5 maxV = min(6 side) ;oct
+	    else maxV = min(6 doM7/2-1 doM7/2-1 doM7/2-ts/2) ) ;rec
+            result = aelEval(wM7 ?minimum minV ?maximum maxV)   wM7=result )	    
+      ("doM8" minV = if(cdfId~>indType~>value=="oct" max(4*wM8+2 4*wM8+ts)  max(2*wM8+2 2*wM8+ts)) ;oct / rec
+            maxV = 400.0 result = aelEval(doM8 ?minimum minV ?maximum maxV) 
+	    minV = 2*wM8+2 result2 = aelEval(doM8 ?minimum minV ?maximum maxV)
+	    doM8=max(result result2) )
+      ("doM7" minV = if(cdfId~>indType~>value=="oct" max(4*wM7+2 4*wM7+ts)  max(2*wM7+2 2*wM7+ts)) ;oct / rec
+            maxV = 400.0 result = aelEval(doM7 ?minimum minV ?maximum maxV) 
+	    minV = 2*wM7+2 result2 = aelEval(doM7 ?minimum minV ?maximum maxV)
+	    doM7=max(result result2) )
+      ("tl" minV = 1.0 maxV = 30.0
+            result = aelEval(tl ?minimum minV ?maximum maxV) tl=result )
+      ("ts" minV = 2.0 
+            if(cdfId~>indType~>value=="oct" then side=min(doM8 doM8)/(2**0.5+1)/2**0.5 maxV = max(minV doM8-2*wM8-2*side);oct
+	    else maxV = doM8-2*wM8);rec
+            result = aelEval(ts ?minimum minV ?maximum maxV)	ts=result )
+      ("ext" minV = min(-doM8 -doM7) maxV = max(doM8 doM7)
+            result = aelEval(ext ?minimum minV ?maximum maxV) ext=result)
+      (t stop=t)
+      )
+;      printf("%L---%L\n" minV maxV)
+    ; replace the parameter
+    unless(stop
+      ; convert to string and attach units
+      cdfP = cdfFindParamByName(cdfId whoCalled)  
+      result = sprintf(nil strcat("%." sprintf(nil "%d" strlen("0.001")-2) "f") result)
+      putprop(cdfP strcat(result "u") "value")
+      ; file stuff
+;      fpath = "/nfs/pdx/disks/dcti_disk0036/work_x22a/template_de2/jmarulan/myDocs/hyperion/hyperion3/sparameters/"
+;      cdfId~>filename~>value = sprintf(nil "ind_%sw_%sdx_%sdy_%sts_%stl_21x1r2m2u1_tttt.s%dp" dotToP(w) dotToP(dx) dotToP(dy) dotToP(ts) dotToP(tl) ports)
+;      cdfId~>file~>value=strcat(fpath cdfId~>filename~>value)
+;     when(not(isFile(cdfId~>file~>value)) warn(strcat("Model does not exist yet, someone simulate and add it to the folder\n" fpath)))
+    )
+  t))
+
+  procedure(disXfmrParams(whoCalled cdfId)
+    when(cdfId~>fill~>value t)
+  )
+  
+;;; GENERIC FNS  
+  procedure(fillM7M8(cv box)
+  let( (size spc layer)
+    size = 2.14:0.6  spc = 0.55*2:1.59*2  layer = "m7"
+    fillBox(cv box "m7" size spc 0.54 1)  fillBox(cv box "m7" size spc 0.54 -1)
+    size = 2.2:2.2 spc = 2.14*2:2.68*2  layer = "m8"
+    fillBox(cv box "m8" size spc 2 1)  fillBox(cv box "m8" size spc 2 -1)    
+  t))
+  
+  procedure(fillBox(cv box layer size spcXY spcDRC sign)
+  let( (w h cols rows orig effOrig rect cBox)
+    w = xCoord(cadr(box)) - xCoord(car(box))  h = yCoord(cadr(box)) - yCoord(car(box))    
+    cols = floor(w / 2 / (car(size)+car(spcXY)))
+    rows = floor( h / (cadr(size)+cadr(spcXY)))
+    orig = rodAddPoints(xCoord(centerBox(box)):yCoord(car(box)) sign*car(spcXY)/2:cadr(spcXY)/2)
+    for(jj 0 rows-1
+      for(ii 0 cols-1
+        effOrig = rodAddPoints(orig sign*ii*(car(spcXY)+car(size)):jj*(cadr(spcXY)+cadr(size)))
+	rect = list(effOrig rodAddPoints(effOrig sign*car(size):cadr(size))) 
+	cBox = list(rodAddPoints(car(rect) -sign*spcDRC:-spcDRC) rodAddPoints(cadr(rect) sign*spcDRC:spcDRC))
+        when( !dbProduceOverlap(cv cBox 32 list(layer "drawing"))  dbCreateRect(cv layer rect) )
+    ))
+  t
+  ))
+
+  procedure(aelEval(entry @key (minimum nil) (maximum nil) (default nil) (grid nil) (str nil)) ;default is assumed correct && on grid
+  let( (out)
+   when((minimum && grid) minimum = ceiling(minimum/grid)*grid)
+   when((maximum && grid) maximum = floor(maximum/grid)*grid)
+   when(type(entry)=='string entry = cdfParseFloatString(entry))
+   default = (default || minimum || entry)
+   if(numberp(entry) then
+     cond( 
+       ( (minimum && entry < minimum)  out = minimum)
+       ( (maximum && entry > maximum)  out = maximum)
+       (t out = entry)
+       )
+     when(grid out=round(out/grid)*grid)   
+   else out = default
+   )
+   when(str out=sprintf(nil "%L" out))
+  out))
+
+  procedure(dotToP(num)
+  num = pcreReplace(pcreCompile("\\.") numToStr(num) "p" 0)  )
+
+  procedure(numToStr(numberGiven @optional (precision 6) )
+  let( ()
+    if(numberp(precision) then
+      sprintf(precision "%d" fix(precision)) 
+    else 
+      sprintf(precision "%d" fix(6))
+    ) ; if
+    case(type(numberGiven)
+      (fixnum sprintf(numberGiven "%d" numberGiven))
+      (flonum sprintf(numberGiven strcat("%." precision "f") float(numberGiven)))
+      (t numberGiven)
+    ) ; case
+    when(rexMatchp("[0-9]*\\." numberGiven )
+      while(rexMatchp("0$" numberGiven) numberGiven = rexReplace(numberGiven "" 1)) ; while to remove extra "0s"
+      when(rexMatchp("\\.$" numberGiven) numberGiven = rexReplace(numberGiven "" 1) ) ; when to make integer for ".0"
+    ) ; when
+    numberGiven
+  )) ; procedure
+
+  procedure(listBBox(bBoxGiven)
+  let( (leftBotX leftBotY rightTopX rightTopY)
+    leftBotX = caar(bBoxGiven)
+    leftBotY = cadar(bBoxGiven)
+    rightTopX = caadr(bBoxGiven)
+    rightTopY = cadadr(bBoxGiven)
+    list(list(leftBotX leftBotY) list(leftBotX rightTopY) list(rightTopX rightTopY) list(rightTopX leftBotY) )
+  )) ; procedure
+  
+list(nil 'buildXfmr buildXfmr 'fixXfmrParamsCB fixXfmrParamsCB 'disXfmrParams disXfmrParams)
+))

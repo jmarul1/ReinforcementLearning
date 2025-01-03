@@ -1,0 +1,202 @@
+procedure(intel22IndPCellCoreHyp4()
+let( ( buildRec buildOct buildCenterTap fixIndParamsCB)
+
+;; LAYOUT BUILD
+  procedure(buildRec(cv topLayer dx dy w tl ts fill)
+  let( ( points )
+    dx = dx*1M dy = dy*1M w = w*1M tl = tl*1M ts = ts*1M
+    ; start the path at the origin and build the coil
+    points = tconc(points rodAddToX(0:0 ts/2+w/2)) 
+    points = tconc(points rodAddToY(cadr(points) tl+w/2)) 
+    points = tconc(points rodAddToX(cadr(points) dx/2-ts/2-w))
+    points = tconc(points rodAddToY(cadr(points) dy-w))    
+    points = tconc(points rodAddToX(cadr(points) -dx+w))        
+    points = tconc(points rodAddToY(cadr(points) -dy+w))
+    points = tconc(points rodAddToX(cadr(points) dx/2-ts/2-w))
+    points = tconc(points rodAddToY(cadr(points) -tl-w/2))                        
+    pathDb = dbCreatePath(cv topLayer car(points) w)   dbConvertPathToPolygon(pathDb)
+    ; add the pins
+    buildPins(cv topLayer points w)
+    ;; chkBoundary
+    dbCreatePRBoundary(cv listBBox(cv~>bBox))
+    when(fill fillM7M8(cv cv~>bBox))
+  ));let;proc
+  
+  procedure(buildOct(cv topLayer dx dy w tl ts fill)
+  let( ( points sidex sidey side)
+    dx = dx*1M dy = dy*1M w = w*1M tl = tl*1M ts = ts*1M
+    side = min(dx dy)/(2**0.5+1)/2**0.5
+    sidex = dx-2*side sidey = dy-2*side     
+    ; start the path at the origin and build the coil
+    points = tconc(points rodAddToX(0:0 ts/2+w/2)) 
+    points = tconc(points rodAddToY(cadr(points) tl+w/2))
+    points = tconc(points rodAddToX(cadr(points) sidex/2-ts/2-w/2)) 
+    points = tconc(points rodAddPoints(cadr(points) side-w/2:side-w/2))
+    points = tconc(points rodAddToY(cadr(points) sidey))    
+    points = tconc(points rodAddPoints(cadr(points) -side+w/2:side-w/2))
+    points = tconc(points rodAddToX(cadr(points) -sidex))        
+    points = tconc(points rodAddPoints(cadr(points) -side+w/2:-side+w/2))    
+    points = tconc(points rodAddToY(cadr(points) -sidey))
+    points = tconc(points rodAddPoints(cadr(points) side-w/2:-side+w/2))    
+    points = tconc(points rodAddToX(cadr(points) sidex/2-ts/2-w/2))         
+    points = tconc(points rodAddToY(cadr(points) -tl-w/2))                        
+    pathDb = dbCreatePath(cv topLayer car(points) w)   dbConvertPathToPolygon(pathDb)
+    ; add the pins
+    buildPins(cv topLayer points w)
+    ;; chkBoundary
+    dbCreatePRBoundary(cv listBBox(cv~>bBox))
+    when(fill fillM7M8(cv cv~>bBox))
+  ));let;proc
+  
+  procedure(buildCenterTap(cv topLayer dx w tl)
+  let( (point fig (hPin 0.5) ctNet (pinName "ct") )
+    dx = dx*1M w = w*1M tl = tl*1M
+    point = dx+tl
+    fig = dbCreatePath(cv topLayer list(0:point 0:point+1) w) dbConvertPathToPolygon(fig)       
+    fig = dbCreateRect(cv list(topLayer "pin") fig~>bBox)
+    ; create the nets
+    ctNet = dbCreateNet(cv pinName)
+    ; create the labels
+    dbCreateLabel(cv list(topLayer "pin") centerBox(fig~>bBox) pinName "centerCenter" "R0" "stick" hPin)
+    dbCreatePin(ctNet fig) ; create the pin    
+  ));  
+ 
+;;; CDF Callbacks
+  procedure(fixIndParamsCB(whoCalled cdfId)
+  let( (w dx dy tl ts cdfP stop result fpath minV maxV ports topLayer)
+    ; convert to number and to microns
+    w  = aelEval(cdfId~>w~>value ?default cdfParseFloatString(cdfId~>w~>defValue))*1e6 
+    dx = aelEval(cdfId~>dx~>value ?default cdfParseFloatString(cdfId~>dx~>defValue))*1e6 
+    dy = aelEval(cdfId~>dy~>value ?default cdfParseFloatString(cdfId~>dy~>defValue))*1e6 
+    tl = aelEval(cdfId~>tl~>value ?default cdfParseFloatString(cdfId~>tl~>defValue))*1e6 
+    ts = aelEval(cdfId~>ts~>value ?default cdfParseFloatString(cdfId~>ts~>defValue))*1e6       
+    topLayer = cdfId~>topLayer~>value
+    stop = nil
+    ; find who call and correct
+      case(whoCalled
+      ("w"  minV = if(topLayer == "m8" 2.001 0.54)
+            if(cdfId~>indType~>value=="oct" then side=min(dx dy)/(2**0.5+1)/2**0.5 maxV = min(25 side) ;oct
+	    else maxV = min(25 dx/2-1 dy/2-1 dx/2-ts/2) ) ;rec
+            result = aelEval(w ?minimum minV ?maximum maxV)   w=result )
+      ("dx" minV = if(cdfId~>indType~>value=="oct" max(4*w+2 4*w+ts)  max(2*w+2 2*w+ts)) ;oct / rec
+            maxV = 400.0
+            result = aelEval(dx ?minimum minV ?maximum maxV) dx=result )
+      ("dy" minV = 2*w+2  maxV = 400.0
+            result = aelEval(dy ?minimum minV ?maximum maxV) dy=result )
+      ("tl" minV = 1.0 maxV = 30.0
+            result = aelEval(tl ?minimum minV ?maximum maxV) tl=result )
+      ("ts" minV = 2.0 
+            if(cdfId~>indType~>value=="oct" then side=min(dx dy)/(2**0.5+1)/2**0.5 maxV = max(minV dx-2*w-2*side);oct
+	    else maxV = dx-2*w);rec
+            result = aelEval(ts ?minimum minV ?maximum maxV)	ts=result )
+      (t stop=t)
+      )
+;      printf("%L---%L\n" minV maxV)
+    ; replace the parameter
+    unless(stop
+      ; convert to string and attach units
+      cdfP = cdfFindParamByName(cdfId whoCalled)  
+      result = sprintf(nil strcat("%." sprintf(nil "%d" strlen("0.001")-2) "f") result)
+      putprop(cdfP strcat(result "u") "value")
+      ; file stuff
+      ports = (if cdfId~>id~>master~>cellName=="mmind2t" 2 3)
+      fpath = "/nfs/pdx/disks/dcti_disk0036/work_x22a/template_de2/jmarulan/myDocs/hyperion/hyperion3/sparameters/"
+      cdfId~>filename~>value = sprintf(nil "ind_%sw_%sdx_%sdy_%sts_%stl_21x1r2m2u1_tttt.s%dp" dotToP(w) dotToP(dx) dotToP(dy) dotToP(ts) dotToP(tl) ports)
+      cdfId~>file~>value=strcat(fpath cdfId~>filename~>value)
+      ;when(not(isFile(cdfId~>file~>value)) warn(strcat("Model does not exist yet, someone simulate and add it to the folder\n" fpath)))
+    )
+  t))
+
+  procedure(buildPins(cv topLayer points w)
+  let( (pathDbL pathDbR hPin lppP lNet rNet (pinNames list("p" "n")))
+    ; build the pins
+    pathDbL = dbCreatePath(cv list(topLayer "pin") list(caar(points) rodAddToY(caar(points) 1)) w) dbConvertPathToPolygon(pathDbL)
+    pathDbR = dbCreatePath(cv list(topLayer "pin") list(cadr(points) rodAddToY(cadr(points) 1)) w) dbConvertPathToPolygon(pathDbR)       
+    ; height of the pin
+    hPin = 0.5 lppP = list(topLayer "pin")
+    ; create the nets
+    lNet = dbCreateNet(cv nth(0 pinNames))
+    rNet = dbCreateNet(cv nth(1 pinNames))
+    ; create the labels
+    dbCreateLabel(cv lppP centerBox(pathDbR~>bBox) nth(0 pinNames) "centerCenter" "R0" "stick" hPin)
+    dbCreateLabel(cv lppP centerBox(pathDbL~>bBox) nth(1 pinNames) "centerCenter" "R0" "stick" hPin)
+    dbCreatePin(lNet pathDbL~>dbId) ; create the pin
+    dbCreatePin(rNet pathDbR~>dbId) ; create the pin    
+  ));let;proc
+
+;;; GENERIC FNS  
+  procedure(fillM7M8(cv box)
+  let( (size spc layer)
+    size = 2.14:0.6  spc = 0.55*2:1.59*2  layer = "m7"
+    fillBox(cv box "m7" size spc 0.54 1)  fillBox(cv box "m7" size spc 0.54 -1)
+    size = 2.2:2.2 spc = 2.14*2:2.68*2  layer = "m8"
+    fillBox(cv box "m8" size spc 2 1)  fillBox(cv box "m8" size spc 2 -1)    
+  t))
+  
+  procedure(fillBox(cv box layer size spcXY spcDRC sign)
+  let( (w h cols rows orig effOrig rect cBox)
+    w = xCoord(cadr(box)) - xCoord(car(box))  h = yCoord(cadr(box)) - yCoord(car(box))    
+    cols = floor(w / 2 / (car(size)+car(spcXY)))
+    rows = floor( h / (cadr(size)+cadr(spcXY)))
+    orig = rodAddPoints(xCoord(centerBox(box)):yCoord(car(box)) sign*car(spcXY)/2:cadr(spcXY)/2)
+    for(jj 0 rows-1
+      for(ii 0 cols-1
+        effOrig = rodAddPoints(orig sign*ii*(car(spcXY)+car(size)):jj*(cadr(spcXY)+cadr(size)))
+	rect = list(effOrig rodAddPoints(effOrig sign*car(size):cadr(size))) 
+	cBox = list(rodAddPoints(car(rect) -sign*spcDRC:-spcDRC) rodAddPoints(cadr(rect) sign*spcDRC:spcDRC))
+        when( !dbProduceOverlap(cv cBox 32 list(layer "drawing"))  dbCreateRect(cv layer rect) )
+    ))
+  t
+  ))
+  
+  procedure(aelEval(entry @key (minimum nil) (maximum nil) (default nil) (grid nil) (str nil)) ;default is assumed correct && on grid
+  let( (out)
+   when((minimum && grid) minimum = ceiling(minimum/grid)*grid)
+   when((maximum && grid) maximum = floor(maximum/grid)*grid)
+   when(type(entry)=='string entry = cdfParseFloatString(entry))
+   default = (default || minimum || entry)
+   if(numberp(entry) then
+     cond( 
+       ( (minimum && entry < minimum)  out = minimum)
+       ( (maximum && entry > maximum)  out = maximum)
+       (t out = entry)
+       )
+     when(grid out=round(out/grid)*grid)   
+   else out = default
+   )
+   when(str out=sprintf(nil "%L" out))
+  out))
+
+  procedure(dotToP(num)
+  num = pcreReplace(pcreCompile("\\.") numToStr(num) "p" 0)  )
+
+  procedure(numToStr(numberGiven @optional (precision 6) )
+  let( ()
+    if(numberp(precision) then
+      sprintf(precision "%d" fix(precision)) 
+    else 
+      sprintf(precision "%d" fix(6))
+    ) ; if
+    case(type(numberGiven)
+      (fixnum sprintf(numberGiven "%d" numberGiven))
+      (flonum sprintf(numberGiven strcat("%." precision "f") float(numberGiven)))
+      (t numberGiven)
+    ) ; case
+    when(rexMatchp("[0-9]*\\." numberGiven )
+      while(rexMatchp("0$" numberGiven) numberGiven = rexReplace(numberGiven "" 1)) ; while to remove extra "0s"
+      when(rexMatchp("\\.$" numberGiven) numberGiven = rexReplace(numberGiven "" 1) ) ; when to make integer for ".0"
+    ) ; when
+    numberGiven
+  )) ; procedure
+  
+  procedure(listBBox(bBoxGiven)
+  let( (leftBotX leftBotY rightTopX rightTopY)
+    leftBotX = caar(bBoxGiven)
+    leftBotY = cadar(bBoxGiven)
+    rightTopX = caadr(bBoxGiven)
+    rightTopY = cadadr(bBoxGiven)
+    list(list(leftBotX leftBotY) list(leftBotX rightTopY) list(rightTopX rightTopY) list(rightTopX leftBotY) )
+  )) ; procedure
+  
+list(nil 'buildRec buildRec 'buildOct buildOct 'buildCenterTap buildCenterTap 'fixIndParamsCB fixIndParamsCB)
+))

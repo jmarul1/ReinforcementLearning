@@ -1,0 +1,13 @@
+if(geGetEditCellView() then
+wspDeleteCellViewAllWSPData(geGetEditCellView())
+wspCreateWSP(geGetEditCellView() "filler_540" ?offset 0.0 0.0 0.54 )
+wspCreateWSP(geGetEditCellView() "filler_630" ?offset 0.0 0.0 0.63 )
+wspCreateWSP(geGetEditCellView() "filler_5p04" ?offset 0.0 0.0 5.04 )
+wspCreateWSP(geGetEditCellView() "filler_8p64" ?offset 0.0 0.0 8.64 )
+;wspCreateWSP(geGetEditCellView() "diffcheck_45" ?offset 0.0 0.0001 0.045 )
+wspCreateWSSPDef(geGetEditCellView() "p1222_filler_x" "c4" "horizontal" 0.54 ?defaultActive "filler_540" ?allowedPatterns list("filler_540"))
+wspCreateWSSPDef(geGetEditCellView() "p1222_filler_y" "c4" "vertical" 0.63 ?defaultActive "filler_630" ?allowedPatterns list("filler_630"))
+wspCreateWSSPDef(geGetEditCellView() "mesh_y" "m5" "vertical" 5.04 ?defaultActive "filler_5p04" ?allowedPatterns list("filler_5p04"))
+wspCreateWSSPDef(geGetEditCellView() "mesh_x" "m5" "horizontal" 8.64 ?defaultActive "filler_8p64" ?allowedPatterns list("filler_8p64"))
+println("tracksLoaded")
+else print("Open a layout view in edit mode to activate track patterns"))

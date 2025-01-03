@@ -1,0 +1,15 @@
+<!DOCTYPE Display>
+<Display>
+    <Current_Lpp name="c4:drawing"/>
+    <Lpp_Display_Order order="0">
+        <LPP name="m4:drawing"/>
+        <LPP name="v3:drawing"/>
+        <LPP name="m3:drawing"/>
+        <LPP name="v2:drawing"/>
+        <LPP name="m2:drawing"/>
+        <LPP name="v1:drawing"/>
+        <LPP name="m1:drawing"/>
+        <LPP name="c4:drawing"/>
+        <LPP name="tv1:drawing"/>
+    </Lpp_Display_Order>
+</Display>

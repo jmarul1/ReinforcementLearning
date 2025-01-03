@@ -1,0 +1,14 @@
+#!/usr/intel/bin/perl
+use strict;
+use Env qw( FDK_PRIMLIB_NAME FDK_TECHLIB_NAME FDK_OALIB_TYPE $FDK_DOTPROC);
+use File::Spec;
+my $libdir = {
+    -prim => File::Spec->canonpath("build/lib/p$FDK_DOTPROC/$FDK_OALIB_TYPE/$FDK_PRIMLIB_NAME"),
+    -tech => File::Spec->canonpath("build/lib/p$FDK_DOTPROC/$FDK_OALIB_TYPE/$FDK_TECHLIB_NAME"),
+    -work => File::Spec->canonpath("build/work/p$FDK_DOTPROC/$FDK_OALIB_TYPE"),
+    -h => "Usage:  $0  <-tech|-prim|-work>\n",
+};
+
+push @ARGV, '-h' unless(@ARGV);
+print map { $libdir->{$_} if $libdir->{$_} } @ARGV;
+

@@ -1,0 +1,193 @@
+;;****pckPostporcessing* pckFunctions/pckPostGenStreamout 
+;;
+;; NAME
+;;
+;; pckPostGenStreamout.il
+;;
+;; AUTHOR
+;;
+;; Pavel Rott
+;;
+;; COPYRIGHT 
+;;
+;; Intel Corporation 2004
+;;
+;; DESCRIPTION 
+;;
+;; Streams the design after test row generation and saves it into the target area (defined by TCC_STREAM_ARCHIVE variable).
+;; Check whether target exists.
+;; Check whether previous version called lib_cell.gds , moves it to lib_cell_prev.gds
+;; Creates a temp directory, copies cdslib file and streamout templates
+;; Stream out the design
+;; Move file from the temp dir to final target
+;;
+;; USAGE
+;;
+;; (load "pckPostGenStreamout.ils")
+;; (pckPostGenStreamout (getShellEnvVar "TCC_STREAM_ARCHIVE") SCRATCH_LIB "x8as_dsr01")
+;;****
+(defun pckPostGenStreamout () nil)
+
+
+(let ()
+  (importSkillVar stdout )
+  (defun _pckPostGenStreamout (target lib cell)
+    (let (cmd fn curdir workdir streamdir loader)
+      (setq streamdir (strcat "/tmp/" lib "." cell ".postgenstream"))
+      ;;
+      ;; laoder is used by streamout template
+	  (if (or
+           (equal (getShellEnvVar "PROJECT") "tccdev")
+           (equal (getShellEnvVar "TCC_DEVELOPMENT_ENV" ) "YES")           )
+          (setq loader (strcat (getShellEnvVar "WORK_AREA_ROOT_DIR") "/tcc_collateral/loader.il"))
+          (setq loader (strcat (getShellEnvVar "DA_UTILS") "/tcc_collateral/loader.il"))
+          )
+      (if (and (isDir target) (ddGetObj lib cell))
+          (progn
+        (setq curdir (getWorkingDir))
+        (changeWorkingDir target)
+        (when (isFile (strcat lib "." cell ".gds"))
+          ;;
+          ;; check if previous file exists
+          (when (isFile (strcat lib "." cell "_prev.gds"))
+            (pckDebug "pckPostGenStreamout" (sprintf nil "Found previous version of stream file %L. Removing it." 
+                                                     (strcat lib "." cell "_prev.gds")))
+            (csh (strcat "rm -rf " lib "." cell "_prev.gds")))
+          (pckDebug "pckPostGenStreamout" (sprintf nil "Moving currect gds file %L to %L."
+                                                   (strcat lib "." cell ".gds")
+                                                   (strcat lib "." cell "_prev.gds")))
+          (csh (strcat "mv -f " lib "." cell ".gds " lib "." cell "_prev.gds >&! /dev/null"))
+          )
+        ;;
+        ;; create a temp directory
+        (when (isDir streamdir)
+          (csh (strcat "rm -rf " streamdir)))
+        (if (csh (strcat "mkdir -p " streamdir))
+            (progn
+              (pckDebug "pckPostGenStreamout" (sprintf nil "Created temprorary drectory for design streamout at %L" streamdir))
+              (sprintf cmd (_streamoutTemplate) streamdir lib cell lib cell 
+                       (strcat (getShellEnvVar "ISSRUNSETS") "/Standard/p" (pckGetProcessId) ".map") loader)
+              (pckDebug "pckPostGenStreamout" (sprintf nil "Creating streamout template file %s" 
+                                                       (setq fn (strcat streamdir "/streamout_template"))))
+              (_createCommandFile fn cmd)
+              (_createCommandFile (strcat streamdir "/cds.lib")
+                                  (sprintf cmd (_createCDSFile) (ddGetForcedLib)))
+              (pckDebug "pckPostGenStreamout" "Starting streamout process.")
+              (_createCommandFile (strcat streamdir "/stream.csh") 
+                                  (_createPipoCommand streamdir (strcat streamdir "/streamout_template")))
+              (csh (strcat "chmod 775 " streamdir "/stream.csh"))
+              (csh (strcat streamdir "/stream.csh"))
+              (if (isFile (strcat streamdir "/" lib "." cell ".gds"))
+                  (progn
+                    (csh (strcat "cp -f " streamdir "/" lib "." cell ".gds " target)))
+                  (progn
+                    (pckDebug "pckPostGenStreamout" (sprintf nil "Could not copy file %L to %L" 
+                                                             (strcat streamdir "/" lib "." cell ".gds")
+                                                             target)))
+                  )
+              )
+            (progn
+              (pckDebug "pckPostGenStreamout" 
+                        (sprintf nil "Cannot create streamout directory %L. Stream file not archived." streamdir))
+              ))
+        (changeWorkingDir curdir)
+        );; progn (and ...
+          (progn 
+            ;;
+            ;; Either directory  or cell does not exist
+            (unless (isDir target)
+              (pckError "pckPostGenStreamout" (sprintf nil "Directory %L does not exist. Streamout procedure aborted." target)))
+            (unless (ddGetObj lib cell)
+              (pckError "pckPostGenStreamout" 
+                        (sprintf nil "Cell %L in library %L does not exist. Streamout procedure aborted." lib cell)))
+            )
+          )
+      )
+    );; _pckPostGenStreamout
+   
+  (defun _streamoutTemplate ()
+    (let (text)
+	  text = "streamOutKeys = list(nil\n
+        'runDir                 %L\n
+        'libName                %L\n
+        'primaryCell            %L\n
+        'viewName               \"layout\"\n
+        'outFile                \"%s.%s.gds\"\n
+        'scale                  0.001000\n
+        'units                  \"micron\"\n
+        'hierDepth              32\n
+        'convertToGeo           t\n
+        'maxVertices            200\n
+        'refLib                 nil\n
+        'libVersion             \"5.0\"\n
+        'checkPolygon           nil\n
+        'snapToGrid             nil\n
+        'simMosaicToArray       t\n
+        'caseSensitivity        \"preserve\"\n
+        'lineToZeroPath         \"path\"\n
+        'convertDot             \"ignore\"\n
+        'rectToBox              nil\n
+        'convertPathToPoly      nil\n
+        'keepPcell      nil\n
+        'useParentXYforText     nil\n
+        'reportPrecision        nil\n
+        'runQuiet               nil\n
+        'errFile                \"PIPO.LOG\"\n
+        'NOUnmappingLayerWarning               nil\n
+        'techFileChoice         nil\n
+        'pcellSuffix            \"DbId\"\n
+        'respectGDSIILimits             nil\n
+        'dumpPcellInfo          nil\n
+        'cellMapTable           \"\"\n
+        'layerTable             %L\n
+        'textFontTable          \"\"\n\n
+        'convertPin             \"geometry\"\n
+        'pinInfo                0\n
+        'pinTextMapTable        \"\"\n
+        'propMapTable           \"\"\n
+        'propSeparator          \",\"\n
+        'userSkillFile          %L\n
+        'rodDir                 \"\"\n
+)";; defines text
+	  text
+	  )
+    )
+  (defun _createCDSFile ()
+	(let ( text )
+	  (setq text "SOFTINCLUDE %s\n" )
+	  text;;
+	  )			
+    )
+  (defun _createPipoCommand (runDir runTemplate)
+	(let (text)
+	  (sprintf text "#!/usr/intel/bin/tcsh -f\n
+setenv CDS_INST_DIR %s\n
+setenv LM_LICENSE_FILE %s\n
+setenv PATH %s\n
+setenv LD_LIBRARY_PATH %s\n
+unalias cd cp touch rm\n
+setenv CAD_ROOT %s\n"
+
+               (getShellEnvVar "CDS_INST_DIR") (getShellEnvVar "LM_LICENSE_FILE") 
+               (getShellEnvVar "PATH") (getShellEnvVar "LD_LIBRARY_PATH") (getShellEnvVar "CAD_ROOT"))
+	  (sprintf text "%s cd %s\n\npipo strmout %s >&! /dev/null\n" text runDir runTemplate)
+	  text
+	  );; let
+	)
+
+  (defun _createCommandFile (fn text)
+    (let (TMPL) 	
+	  (setq TMPL (outfile fn "w"))
+	  (fprintf TMPL "%s\n" text) 
+	  (drain TMPL)
+	  (close TMPL)
+	  ))
+  
+  
+
+  (setq pckPostGenStreamout _pckPostGenStreamout)
+  nil
+  )
+
+
+;;; pckPostGenStreamout.il ends here

@@ -1,0 +1,143 @@
+#!/usr/bin/env python3.7.4
+##############################################################################
+# Intel Top Secret                                                           #
+##############################################################################
+# Copyright (C) 2013, Intel Corporation.  All rights reserved.               #
+#                                                                            #
+# This is the property of Intel Corporation and may only be utilized         #
+# pursuant to a written Restricted Use Nondisclosure Agreement               #
+# with Intel Corporation.  It may not be used, reproduced, or                #
+# disclosed to others except in accordance with the terms and                #
+# conditions of such agreement.                                              #
+#                                                                            #
+# All products, processes, computer systems, dates, and figures              #
+# specified are preliminary based on current expectations, and are           #
+# subject to change without notice.                                          #
+##############################################################################
+## Global Text
+H1 = 'courier',21; H2 = 'courier',18; H3 = 'courier',15; H4 = 'courier',12; HL = 'courier',9,'bold','italic'
+#/p/adx/x76esetup -g ciaf,f1276,f76_mdls -ot cpdk7622_r0.9.1_20ww22.2 -w rv1
+def defaults():
+  import types, collections
+  techs = {}; startCmdDt = {};
+  #### technologies
+  techs['1278'] = ['21']; 
+  techs['1276'] = ['22','31','41'];  
+  techs['1274'] = ['7','11','12'];  
+  techs['1231'] = ['0']; 
+  #### environment starts  
+  for kk in techs.keys(): startCmdDt[kk] = {}
+  startCmdDt['1278']['21'] = '/p/adx/x78aa -w pde1'
+  startCmdDt['1276']['22'] = '/p/adx/shdk76setup -w wict_de -b x76c:x76ctemplate.X76CAwork -ot p1276_setup_cad18_runset0.6.0.ot'
+  startCmdDt['1276']['31'] = '/p/adx/x76esetup -g ciaf,f1276,f76_mdls -ot cpdk7622_r0.9.1_20ww22.2 -w rv1'
+  startCmdDt['1276']['41'] = '/p/adx/x76esetup -g ciaf,f1276,f76_mdls -ot cpdk7622_r0.9.1_20ww22.2 -w rv1'
+  startCmdDt['1274']['7']  = '/p/adx/x74dsetup -g p1222 -w wict_de -m TEMPLATE_DEV -n X74D/layerDrop -ot techfiles_v78.ot'
+  startCmdDt['1274']['11'] = '/p/adx/x74dsetup -g p1222 -w wict_de -m TEMPLATE_DEV -n X74D/layerDrop -ot techfiles_v78.ot'
+  startCmdDt['1274']['12'] = '/p/adx/x74dsetup -g p1222 -w wict_de -m TEMPLATE_DEV -n X74D/layerDrop -ot techfiles_v78.ot'
+  startCmdDt['1231']['0']  = 'source /nfs/pdx/disks/wict_tools/env/p1231/wictsetup'
+  qaLibArea = '/nfs/pdx/disks/wict_tools/releases/RF_COLLATERAL/qaLibs'                               #### qa libraries
+  runArea = '/nfs/pdx/disks/dcti_disk0036/work_x22a/template_de2/template_QA/runQaAreaWiCT';          #### run areas
+  return types.SimpleNamespace(techs = techs, start = startCmdDt, qaLibA = qaLibArea, ward = runArea) #### return
+
+def runProg(cmd):
+  import qa, os, subprocess
+#  log = subprocess.run('debugQa.py',shell=True,capture_output=True); print(log.stdout); return qa.decode(log.stdout.decode()),''
+  for tries in [1,2,3]:
+    print(f'Running this CMD:\n{cmd}'); 
+    log = subprocess.run(cmd,shell=True,capture_output=True)
+    test = qa.decode(log.stdout.decode());
+    if test and test == 'ReRunMe': print( 'RETRY'); continue #env fluke error retry
+    elif test and len(test.split())==4: return test,'' #return the files
+    elif test:
+      testSp = test.split() 
+      if os.path.isdir(testSp[0]): envFout = open(testSp[0]+'/env.log','wb'); envFout.write(b' '.join([log.stdout,log.stderr])); envFout.close()
+      return test+' ABORTED','' #runs went thru but runs failed
+    else: break #something went wrong with the run setup/exec return False and the errors
+  return False,b' '.join([log.stdout,log.stderr]) #something went wrong with the run setup/exec return False and the errors
+
+def createHtml(techDot,logs,outDir):
+  import re
+#  import pdb; pdb.set_trace()
+  fHtml = outDir+'/p'+techDot+'_sictqa.html'; 
+  htmlLst = ['<table cellspacing="1" border="1"><tr><td colspan="3"><h1>PTD AD QA</h1></td></tr>']
+  items,errs = logs
+  if items == False: return False
+  htmlLst += ['<tr><td valign="middle" align="center" rowspan="2" style="color:indigo"><h2>'+techDot+'</h2></td>']
+  items = items.split(); resultC = 'red' if re.search(r'fail|abort',items[3],flags=re.I) else 'green'
+  htmlLst += ['<td valign="middle" align="center"><a href="'+items[0]+'" style="color:blue"><h2>QA Results</a><br><font color="'+resultC+'">'+items[3]+'</font></h2></td>']
+  htmlLst += ['<td valign="middle" align="center" rowspan=2><h3>runset:<br>'+items[2]+'</h3></td></tr>']
+  htmlLst += ['<tr><td valign="middle" align="center"><a href="'+items[1]+'" style="color:darkslategray"><h3>Run Logs</h3></a></td></tr>']    
+  htmlLst += ['</table>']
+  with open(fHtml,'w') as fout: fout.write('\n'.join(htmlLst)); return fHtml 
+
+def isThereLog(tech,dot,ward): 
+  import os, subprocess
+  report = f'{ward}/p{tech}/p{tech}_{dot}_sictqa.html'
+  if os.path.isfile(report): 
+    if subprocess.run('grep PASS '+report,shell=True,capture_output=True).stdout: return report,'CLEAN ',('white','darkgreen')
+    return report,' FAIL ',('white','red')
+  else: return False,'NO LOG',None
+
+def runQa(button):
+  button.Update(text='running',disabled=True)  
+  runTheQa(button) #  pool.apply_async(runTheQa,(button,))
+  button.Update(text='  RUN  ',disabled=False) 
+            
+def runTheQa(button):
+  import os, subprocess
+  tech,dot,setup,qaLib,ward,logB = button.metadata; runArea = f'{ward}/p{tech}'; qaLib = f'intel{tech[2:]}qa {qaLib}/intel{tech[2:]}qa'
+  test,x,y = isThereLog(tech,dot,runArea);
+  if test: subprocess.run('rm -f '+test,shell=True); dotUpdate(dot,tech,runArea,logObj,activeThread=True)   ## Delete previous report
+  cmd = ' '.join(['runRepQaV2.py','-dot',dot,'-qalib',qaLib,'-runarea',runArea]); runFile = runArea+'/runQa_'+tech+'_'+dot+'.csh'   ## Build the main command
+  if not os.path.exists(runArea): subprocess.call('mkdir '+runArea,shell=True)
+  cmd = f'; {cmd}' if tech in ['1231'] else f"-cmd '{cmd}'" 
+  with open(runFile,'w') as fout: fout.write(f'{setup} {cmd}\n')
+  logs = runProg(f"wash -n users p1222 f1231 p1274 p1276 p1278 hdk7nm soc hdk7nmproc -c 'source {runFile}'");  outF = createHtml('_'.join([tech,dot]),logs,runArea)
+  if outF == False: print(outF,logs)
+  logLink,textLog,colorLog = isThereLog(tech,dot,ward)## update the logs
+  logB.update(text=textLog,disabled=not(logLink),button_color=colorLog)
+
+def popLink(button):
+  import subprocess
+  tech,dot,setup,qaLib,ward = button.metadata; 
+  path,x,y = isThereLog(tech,dot,ward)
+  if path: subprocess.call('firefox '+path+'&',shell=True,stderr=subprocess.PIPE,stdout=subprocess.PIPE)
+
+def popKonsole(button):
+  import subprocess
+  tgtDir = button.metadata
+  subprocess.run('konsole --workdir '+tgtDir,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+  
+##############################################################################
+# Main Begins
+##############################################################################  
+import PySimpleGUI as sg, re, multiprocessing
+menu = defaults(); layout = []  # menu has techs = techs, start = startCmdDt, qaLib = qaLibDt, ward = runArea)
+## create headings and columns
+heads = ['Tech','Dot','Environment Setup','','Reports']; colW = [150,100,1000,10,150]
+headings = [sg.Text(hh,justification='center',size=(int(ww/H1[1]),1), font = H1, text_color='darkred') for hh,ww in zip(heads,colW)]; 
+layout.append([*headings]) 
+## technology 
+for tech,dots in menu.techs.items():
+  for dot in dots:
+    pkg = tech,dot,menu.start[tech][dot],menu.qaLibA,menu.ward  # package to store in the buttons
+    logLink,textLog,colorLog = isThereLog(tech,dot,menu.ward)
+    techE = sg.Text(tech,justification='center',font=H2,size=(int(colW[0]/H2[1]),1)) ## technology
+    dotE = sg.Text(dot,justification='center',font=H2, size=(int(colW[1]/H2[1]),1)) ## dot
+    stE = sg.InputText(menu.start[tech][dot],size=(int(colW[2]/H4[1]),1),font=H4)## startup
+    logB = sg.Button(button_text=textLog,key=f'LOG{tech}.{dot}',metadata=pkg,font=H3,tooltip='firefox log',disabled=not(logLink),button_color=colorLog)## log Button
+    runB = sg.Button(button_text='  RUN  ',metadata=[*pkg,logB], font=H3,tooltip='trigger qa run')## run Button
+    layout.append([techE,dotE,stE,runB,logB])
+# create a button for qaLibs
+layout.append([sg.Button(key='KON',button_text='qaLibraries',font=H4,metadata=menu.qaLibA,pad=((400,0),(0,0))), sg.Button(key='KON',button_text='WARD',font=H4,metadata=menu.ward)])
+## array it
+window = sg.Window('SiCT QA Regressions', layout, grab_anywhere=False)
+## loop for events
+while True:
+  event, values = window.read()
+  if event is None or event == 'Exit': break
+  if re.search(r'^\s*RUN',event): runQa(window[event]);
+  if re.search(r'^\s*LOG',event): popLink(window[event])  
+  if re.search(r'^\d*KON',event): popKonsole(window[event])
+window.close() 
+exit()

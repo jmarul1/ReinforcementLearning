@@ -1,0 +1,16 @@
+LIBRARY =  "hyperion4_s22"
+CELL = "mmmfc_cst"
+pcDefinePCell(
+  ;list for first argument  
+  list( ddGetObj(LIBRARY) CELL "layout")
+  ;list of pcell parameters   
+  ( (botLayer string "m1")
+    (nx     string  "1"  )
+    (ny     string  "1"  )	     
+  )
+  ;body of the code
+  let( (mfcPkg) 				
+    mfcPkg = intel22MfcPCellCore()
+    mfcPkg->buildMfc(pcCellView botLayer nx ny)
+  ) ;
+) ; end of pcDefinePCell

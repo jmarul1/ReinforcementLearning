@@ -1,0 +1,91 @@
+#!/usr/bin/env python3.7.4
+##############################################################################
+# Intel Top Secret                                                           #
+##############################################################################
+# Copyright (C) 2020, Intel Corporation.  All rights reserved.               #
+#                                                                            #
+# This is the property of Intel Corporation and may only be utilized         #
+# pursuant to a written Restricted Use Nondisclosure Agreement               #
+# with Intel Corporation.  It may not be used, reproduced, or                #
+# disclosed to others except in accordance with the terms and                #
+# conditions of such agreement.                                              #
+#                                                                            #
+# All products, processes, computer systems, dates, and figures              #
+# specified are preliminary based on current expectations, and are           #
+# subject to change without notice.                                          #
+#                                                                            #
+##############################################################################
+# Report suggestions or bugs to Mauricio Marulanda
+##############################################################################
+
+def getModel(values,modelGaN,modelHR,modelLR):
+  dt = isinstance(values,dict)
+  if values == 'highRes' or (dt and values['highRes']): return modelHR
+  elif values == 'lowRes' or (dt and values['lowRes']): return modelLR
+  else: return modelGaN
+  
+def getDims(values,fk,lk,qk,modelGaN,modelHR,modelLR,results):
+  freq,ind,Q = values[fk],values[lk],values[qk]
+  freq,ind,Q = list(map(lambda ff: float(ff) if numtools.isNumber(ff) else None,[values[fk],values[lk],values[qk]]))
+  model = getModel(values,modelGaN,modelHR,modelLR)
+  outcome = model.closestNums(freq,ind,Q);  winners = model.getWinnerDims(results)
+  if outcome != 'SUCCESS': return ['Frequency/Inductance out of range']
+  else: return winners
+
+def printMe(window,values,length):
+  for ii in range(length):
+    if ii < len(values): value = values[ii]
+    else: value = ''
+    window[f'output{ii}'].update(f'\t{value}')
+
+def plotMe(values,modelGaN,modelHR,modelLR):
+  model = getModel(values,modelGaN,modelHR,modelLR)
+  model.plotBest(4)
+  pl.show(block=False)
+
+def updateRanges(event,modelGaN,modelHR,modelLR,fk,lk,qk,window=False):
+  model = getModel(event,modelGaN,modelHR,modelLR)
+  ranges = model.data.loc[:,[model.fk,model.qk,model.lk]].describe();
+  fmin,lmin,qmin = ranges.loc['min',[model.fk,model.lk,model.qk]]; fmax,qmax = ranges.loc['max',[model.fk,model.qk]]; lmin,qmin = max(0,lmin),max(0,qmin); ranges = {}
+  lmax = model.data.loc[model.data[model.fk] < 0.2,model.lk].max()
+  ranges[fk],ranges[lk],ranges[qk] = [f'{fmin}','Freq',f'{fmax}'],[f'{lmin:.3f}','L',f'{lmax:.3f}'],[f'{qmin:.3f}','Q',f'{qmax:.3f}']
+  if window:
+    for ii,kk in enumerate([fk,lk,qk]): window[f'range{ii}'].update(f'\t{ranges[kk][0]} < {ranges[kk][1]} < {ranges[kk][2]}')
+  else: return ranges  
+
+##############################################################################
+# Main Begins
+##############################################################################  
+import PySimpleGUI as sg, re, multiprocessing, sclind, numtools, matplotlib.pyplot as pl
+## Global Variables
+H1 = 'courier',30; H2 = 'courier',18; H3 = 'courier',15,'bold'; H4 = 'courier',14; HL = 'courier',13,'bold','italic'; sg.theme('BluePurple'); layout = []; results = 7; width = 33
+## model
+indModelHR,indModelLR,indModelGaN = sclind.init(subs='hr'), sclind.init(subs='lr'), sclind.init(subs='gan')
+fk,qk,lk = 'Frequency(GHz)','Quality Factor','Inductance(nH)'; ranges = updateRanges('highRes',indModelGaN,indModelHR,indModelLR,fk,lk,qk)
+## create headings
+layout.append([sg.Text('Inductor FQL Guide',justification='center',size=(width,1), font = H1, text_color='darkred')]); layout.append([sg.Text('')])
+plotB = sg.Button(button_text='plot',font=H3,tooltip='Plot Best QL')## run Button
+## labels and values
+for ii,ll in enumerate([fk,lk,qk]):
+  inT = sg.Text(ll,justification='left',size=(int(width/2),1), font = H2); inE = sg.InputText('',size=(7,1),font=H2,enable_events=True,key=ll)
+  inL = sg.Text(f'\t{ranges[ll][0]} < {ranges[ll][1]} < {ranges[ll][2]}', font = H4, key=f'range{ii}')
+  layout.append([inT,inE,inL])
+layout.append([sg.Radio(ll,'RADIO',size=(int(width/4),1),font=H2,default=(ll=='highRes'),enable_events=True,key=ll) for ll in ['lowRes','highRes','GaN']])
+layout[-1]+=[plotB]
+## output text
+for ll in range(results+1): layout.append([sg.Text('',justification='left',size=(2*width,1),font=H3,key=f'output{ll}',text_color='darkblue')]) 
+## array it
+layout.append([sg.Text('Suggestions/Bugs report to mauricio.marulanda@intel.com',justification='right',size=(int(2.4*width),1),font=HL,text_color='darkred')])
+window = sg.Window('Inductor GUI', layout, grab_anywhere=False);
+## loop for events
+while True:
+  event, values = window.read()
+  if event is None or event == 'Exit': break
+  if event!= 'plot' and not numtools.isNumber(values[event]): window[event].update('')
+  if re.search(r'lowRes|highRes|GaN',event): updateRanges(event,indModelGaN,indModelHR,indModelLR,fk,lk,qk,window)
+  if all(map(numtools.isNumber,[values[fk],values[lk]])):
+    outputs = getDims(values,fk,lk,qk,indModelGaN,indModelHR,indModelLR,results)
+    printMe(window,outputs,results)
+    if event == 'plot': plotMe(values,indModelGaN,indModelHR,indModelLR)
+window.close() 
+exit()

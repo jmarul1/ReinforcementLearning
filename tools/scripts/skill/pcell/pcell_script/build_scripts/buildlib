@@ -1,0 +1,899 @@
+#!/usr/bin/env perl
+
+use strict;
+
+# $Header: /nfs/pdx/disks/icf_f1273_dsvault001/sync_vault/server_vault/Projects/fdk73/oalibs/common/custom/build_scripts/buildlib.rca 1.17 Thu Jan 31 17:15:05 2013 kflowers Experimental pckda pckda pckda pckda pckda pckda pckda $
+our $VERSION = '$Revision: 1.17 $';
+$VERSION =~ s/^Revision: //;
+$VERSION =~ s/ \$$//;
+
+# $KeysEnd$
+
+# * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+#
+# (C) Copyright Intel Corporation, 2010
+# Licensed material -- Program property of Intel Corporation
+# All Rights Reserved
+#
+# This program is the property of Intel Corporation and is furnished
+# pursuant to a written license agreement. It may not be used, reproduced,
+# or disclosed to others except in accordance with the terms and conditions
+# of that agreement.
+#
+# * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+use Cwd qw(realpath);
+use Data::Dumper;
+$Data::Dumper::Indent = 2;
+use File::Path;
+use FindBin qw($Script);
+use Getopt::Long;
+use YAML;
+
+#######################################################
+#                  GLOBALS
+#######################################################
+
+local $main::DEBUG = "";
+my $CELLTYPE = "";
+
+if (exists $ENV{FDK_OALIB_TYPE}) {
+  $CELLTYPE = $ENV{FDK_OALIB_TYPE};
+}
+
+my @BUILD_ORDER = ("init", "propbag", "cdf", "pcell", "pycell", "context", "tcl", "categories", "prune");
+
+#######################################################
+#                  Help Message
+#######################################################
+
+my $help_message = <<HERE
+	SYNTAX: $Script -p <process> -l <library> [-context] [-test] [-list] [-config <config file>] [-clean] [-c <cell> ...] [-o <file>] [-pack <package>] [-a <action> ....] [-libPath <path>] [-workpath <dir>]
+
+       -p <#>           Process number
+       -l <library>     Library to build
+       -prune           Adds pruning step
+       -noprune         Skips pruning step
+       -clean           Deletes libray and work dir, initialized library
+       -libPath <dir>   Optional lib path
+       -workPath <dir>  Optional work path
+       -tech  <name>    name of techfile (used for library initialization
+       -config <file>   Configuration yaml file to read
+       -context         Switch to enable Skill context building
+       -test            Do not execute commands, only create command file
+       -list            List all possible actions
+       -pack <name>     Name of package to be built
+       -c <cell>        Cell to build. Must be used with -pack argument
+                          Multiple -c <cell> options may be used on the same command line
+       -o <file>        Specified the output command file
+       -a <action>      Action to be performed
+                          Multiple -a <action> options may be used on the same command line
+
+Example:
+
+
+HERE
+  ;
+$help_message =~ s/\t/    /g;    # Replace tabs with 4 spaces
+
+# Prints hash, array ,hash of hash, or any combination. Optional 2nd arg is the name of the hash
+# usage example: printAny(\%data,"data");
+#                printAny(\@data,"data");
+sub printAny {
+  my ($data, $dataname) = @_;
+  my ($key,  $index)    = (undef) x 2;
+  if (ref $data eq "ARRAY") {
+    if ($dataname eq "" && ref $data eq "ARRAY") {
+      $dataname = "ARRAY";
+    }
+    for ($index = 0 ; $index <= $#{@$data} ; ++$index) {
+      if (ref $$data[$index] eq "HASH") {
+        &printAny(\%{ $$data[$index] }, "$dataname\[$index\]");
+      } elsif (ref $$data[$index] eq "ARRAY") {
+        &printAny(\@{ $$data[$index] }, "$dataname\[$index\]");
+      } else {
+        print STDERR "$dataname\[$index\]=$$data[$index]\n";
+      }
+    }
+  }
+  if (ref $data eq "HASH") {
+    if ($dataname eq "" && ref $data eq "HASH") {
+      $dataname = "HASH";
+    }
+    foreach $key (keys %$data) {
+      if (ref $$data{$key} eq "HASH") {
+        &printAny(\%{ $$data{$key} }, "$dataname\{$key\}");
+      } elsif (ref $$data{$key} eq "ARRAY") {
+        &printAny(\@{ $$data{$key} }, "$dataname\{$key\}");
+      } else {
+        print STDERR "$dataname\{$key\}=$$data{$key}\n";
+      }
+    }
+  }
+}
+
+#######################################################
+#       getCells
+#######################################################
+sub getCells {
+  my ($configPtr, $hashPtr, $name) = @_;
+  my @results = ();
+  my ($key, $cell) = (undef) x 2;
+  if (ref $configPtr eq "HASH") {
+    foreach $key (keys %$configPtr) {
+      &getCells(\%{ $$configPtr{$key} }, $hashPtr, $name . "/" . $key);
+    }
+  } else {
+    foreach $cell (@$configPtr) {
+      push(@{ $$hashPtr{$name} }, $cell);
+    }
+  }
+}
+
+#######################################################
+#       getAllCells
+#######################################################
+sub getAllCells {
+  my ($buildConfigPtr, $cellList, $process) = @_;
+  my ($package) = (undef) x 1;
+  foreach $package (keys %{ $$buildConfigPtr{process}{$process}{package_definitions} }) {
+    &getCells(\%{ $$buildConfigPtr{process}{$process}{package_definitions}{$package} }, $cellList, $package);
+  }
+}
+
+#######################################################
+#       findContent
+# Description: Allows locating the source file at a higher level
+# in the PACKAGE path. Since some packages may have hierarchy, but
+# some actions may allow combining cells at a high level, this routine
+# locates the proper file.
+# Example:
+#       propbag/template/diode/diode.csv
+#       propbag/template/inductor/inductor.csv
+#       lib/pcell/template/template.pc    <- this will build both inductor and diode
+#######################################################
+sub findContent {
+  my ($package, $dirPath, $prefix, $suffix) = @_;
+  my ($newPackage, $path, $root) = (undef) x 3;
+
+  $path = $package;
+  $path =~ s/\/[^\/]+//;
+  $root = $package;
+  $root =~ s/.+\///g;
+  if (!-e "$dirPath/$package/$prefix$root$suffix") {
+    if ($path ne $root) {
+      $newPackage = &findContent($path, $dirPath, $prefix, $suffix);
+    }
+  } else {
+    $newPackage = $package;
+  }
+  return $newPackage;
+}
+
+#######################################################
+#       dirNotEmpty
+#######################################################
+sub dirNotEmpty {
+  my ($dirPath) = @_;
+  my ($flag)    = (undef) x 1;
+  my @fileList  = ();
+
+  $flag = 0;
+  opendir THISDIR, $dirPath;
+  @fileList = grep /^[^\.]/, readdir THISDIR;
+  closedir THISDIR;
+  if ($#fileList >= 0) {
+    $flag = 1;
+  }
+  return ($flag);
+}
+
+#######################################################
+#       findContentDir
+#######################################################
+sub findContentDir {
+  my ($package, $dirPath) = @_;
+  my ($newPackage, $path, $root) = (undef) x 3;
+
+  $path = $package;
+  $path =~ s/\/[^\/]+//;
+  $root = $package;
+  $root =~ s/.+\///g;
+  if (!-e "$dirPath/$package") {
+    if ($path ne $root) {
+      $newPackage = &findContentDir($path, $dirPath);
+    }
+  } else {
+    $newPackage = $package;
+  }
+  return $newPackage;
+}
+
+#######################################################
+#       printCellList
+#######################################################
+sub printCellList {
+  my ($buildConfigPtr, $process, $package) = @_;
+  my ($cell,           $comma,   $base)    = (undef) x 3;
+  my %cellList = ();
+  $base = $package;
+  $base =~ s/\/.+//g;
+
+  &getCells(\%{ $$buildConfigPtr{process}{$process}{package_definitions}{$base} }, \%cellList, $base);
+  $comma = "";
+  foreach $cell (@{ $cellList{$package} }) {
+    printf("%s%s", $comma, $cell);
+    $comma = ",";
+  }
+  printf("\n");
+}
+
+#######################################################
+#       createConfig
+#  Description:
+#        If someone specifies a package and cells on the command line, the config is ignored and
+#        this hash will be used instead.
+#        This will create a hash equivelent to what is parsed from the config yaml file
+#######################################################
+sub createConfig {
+  my ($process, $package, $actionListPtr, $cellListPtr) = @_;
+  my ($cell, $action) = (undef) x 2;
+  my %hash = ();
+
+  #HASH{process}{p4}{build_packages}{propbag}[0]=mos
+  #HASH{process}{p4}{package_definitions}{mos}[0]=n
+  foreach $action (keys %$actionListPtr) {
+    push(@{ $hash{process}{$process}{build_packages}{$action} }, $package);
+  }
+  foreach $cell (@$cellListPtr) {
+    push(@{ $hash{process}{$process}{package_definitions}{$package} }, $cell);
+  }
+  return (\%hash);
+}
+
+#######################################################
+#       createInit
+#######################################################
+sub createInit {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $techFile, $workPath, $libPath, $techPath) = @_;
+  my ($root, $cell, $package, $actualPackage) = (undef) x 4;
+  my %cellList = ();
+
+  # If building the tech library, the initLib.csh does not need to be run more than once. As it is only building the tech file
+  # No copying of FE content
+  if ($library eq $techFile) {
+    printf("%s/initLib.csh -p %s -l %s -t %s -workPath %s -libPath %s\n", "./build_scripts", $process, $library, $techFile, $workPath, $libPath);
+  } else {
+    foreach $package (keys %{ $$buildConfigPtr{process}{$process}{package_definitions} }) {
+      &getCells(\%{ $$buildConfigPtr{process}{$process}{package_definitions}{$package} }, \%cellList, $package);
+    }
+    foreach $package (keys %cellList) {
+      if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+        $root = $package;
+        $root =~ s/.+\///g;
+        printf("%s/initLib.csh -p %s -l %s -t %s -workPath %s -libPath %s -techlib_path %s -t %s", "./build_scripts", $process, $library, $techFile, $workPath, $libPath, $techPath, $techFile);
+        foreach $cell (@{ $cellList{$package} }) {
+          printf(" -c %s", $cell);
+        }
+        printf("\n");
+        printf("if (\$status) then\n  exit(1)\nendif\n");
+
+      }
+    }
+  }
+
+  ### Add the following chunk of code to the builder.script
+  ### to "clean up" the copied OALib definitions before letting the
+  ### rest of the steps get a crack at them.
+  print <<__EOF__;
+
+############################################################
+#   Make sure files & directories in workPath have reasonable permissions.
+############################################################
+find "$workPath" \\
+  -type d -exec chmod u=rwx,g=rx,o= \\{} \\; -o \\
+  -type f -exec chmod u=rw,g=r,o= \\{} \\;
+if (\$status != 0) then
+  exit 1
+endif
+
+############################################################
+#   Get rid of any .SYNC directories in the workPath
+############################################################
+find "$workPath" -type d -name .SYNC -print -prune | xargs rm -fr
+if (\$status != 0) then
+  exit 1
+endif
+
+############################################################
+#   Make sure files & directories in target lib have reasonable permissions.
+############################################################
+find "$libPath/$library" \\
+  -type d -exec chmod u=rwx,g=rx,o= \\{} \\; -o \\
+  -type f -exec chmod u=rw,g=r,o= \\{} \\;
+if (\$status != 0) then
+  exit 1
+endif
+
+############################################################
+#    Do cdsinfo.tag file checks & canonicalization
+############################################################
+awk -f ../build_scripts/cdsinfo_tag_check.awk "$libPath/$library/cdsinfo.tag"
+if (\$status != 0) then
+  exit 1
+endif
+
+############################################################
+#   Get rid of a lot of crap which might
+#   screw up our pruning session.
+############################################################
+find "$libPath/$library" \\
+  -type d -name .SYNC -exec rm -fr \\{} \\; -prune -o \\
+  -type d -name 'zpcell*' -print -prune -o \\
+  -type f -name '*.cdslck' -print -o \\
+  -type f -name '*-' -print -o \\
+  -type f -name '*%' -print -o \\
+  -type f -name '*.syncmd' -print -o \\
+  -type f -name '*.png' -print -o \\
+  -type f -name '.lock' -print \\
+| xargs rm -fr
+if (\$status != 0) then
+  exit 1
+endif
+
+__EOF__
+
+}
+
+#######################################################
+#       createCdf
+#######################################################
+sub createCdf {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $workPath, $libPath) = @_;
+  my ($root, $cell, $package, $actualPackage, $validPackage) = (undef) x 4;
+  my %cellList = ();
+
+  #foreach $package (@{$$buildConfigPtr{process}{$process}{build_packages}{cdf}}){
+  #    &getCells(\%{$$buildConfigPtr{process}{$process}{package_definitions}{$package}},\%cellList,$package);
+  #}
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{cdf} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "cdf.skill", "fdkCdf_", ".cdf");
+          if (defined $actualPackage) {
+            $root = $actualPackage;
+            $root =~ s/.+\///g;
+            printf("%s/loadCdf.csh -p %s -l %s -workPath %s -libPath %s cdf.skill/%s/fdkCdf_%s.cdf ", "../build_scripts", $process, $library, $workPath, $libPath, $actualPackage, $root);
+            foreach $cell (@{ $cellList{$package} }) {
+              printf(" -c %s", $cell);
+            }
+            printf("\n");
+            printf("if (\$status) then\n  exit(1)\nendif\n");
+          } else {
+            printf(STDERR "-E- Error: Unable to locate CDF at (cdf.skill/$package)\n");
+            exit(1);
+          }
+        }
+      }
+    }
+  }
+}
+
+#######################################################
+#       createPropbag
+#######################################################
+sub createPropbag {
+
+  my ($process, $library, $singlePackage, $buildConfigPtr, $workPath, $libPath) = @_;
+
+  my ($root, $cell, $package, $actualPackage, $validPackage) = (undef) x 5;
+
+  my %cellList = ();
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{propbag} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "propbag.dir", "", ".csv");
+          if (defined $actualPackage) {
+            $root = $actualPackage;
+            $root =~ s/.+\///g;
+            printf("%s/loadPropbag.csh -p %s -l %s  -y %s -workPath %s -libPath %s propbag.dir/%s/%s.csv ", "../build_scripts", $process, $library, "$workPath/propbags/$root", $workPath, $libPath, $actualPackage, $root);
+            foreach $cell (@{ $cellList{$package} }) {
+              printf(" -c %s", $cell);
+            }
+            printf("\n");
+            printf("if (\$status) then\n  exit(1)\nendif\n");
+          } else {
+            printf(STDERR "-E- Error: Unable to locate CSV file at (propbag.dir/$package)\n");
+            exit(1);
+          }
+        }
+      }
+    }
+  }
+
+}
+
+#######################################################
+#       createPycell
+#######################################################
+sub createPycell {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $workPath,      $libPath)      = @_;
+  my ($root,    $cell,    $package,       $base,           $actualPackage, $validPackage) = (undef) x 6;
+  my %cellList = ();
+  my %flag     = ();
+
+  #foreach $package (@{$$buildConfigPtr{process}{$process}{build_packages}{pycell}}){
+  #    &getCells(\%{$$buildConfigPtr{process}{$process}{package_definitions}{$package}},\%cellList,$package);
+  #}
+  #foreach $package (@{$$buildConfigPtr{process}{$process}{build_packages}{pycell}}){
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{pycell} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "lib/python", "", ".py");
+          if (defined $actualPackage) {
+            $base = $actualPackage;
+            $root = $actualPackage;
+            $base =~ s/\/.+//g;
+            $root =~ s/.+\///g;
+            if (!exists $flag{$base}) {
+              printf("%s/pycell_compile.csh -p %s -l %s -workPath %s -libPath %s %s ", "../build_scripts", $process, $library, $workPath, $libPath, $actualPackage);
+              foreach $cell (@{ $cellList{$package} }) {
+                printf(" -c %s", $cell);
+              }
+              printf("\n");
+              printf("if (\$status) then\n  exit(1)\nendif\n");
+              $flag{$base} = 1;
+            } else {
+              printf(STDERR "-E- Error: Multiple Pycell builds using the same code for package ($base)\n");
+              printf(STDERR "            This will cause an overwrite of the $base.zip file\n");
+              exit(1);
+            }
+          } else {
+            printf(STDERR "-E- Error: Unable to locate Python file at (lib/python/$package)\n");
+            exit(1);
+          }
+        }
+      }
+    }
+  }
+}
+
+#######################################################
+#       createPycellSch
+#######################################################
+sub createPycellSch {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $workPath,      $libPath)      = @_;
+  my ($root,    $cell,    $package,       $base,           $actualPackage, $validPackage) = (undef) x 6;
+  my %cellList = ();
+  my %flag     = ();
+
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{pycell_sch} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "lib/python", "", ".py");
+          if (defined $actualPackage) {
+            $base = $actualPackage;
+            $root = $actualPackage;
+            $base =~ s/\/.+//g;
+            $root =~ s/.+\///g;
+            if (!exists $flag{$base}) {
+              printf("%s/pycell_compile.csh -p %s -l %s -workPath %s -libPath %s  -view schematic %s ", "../build_scripts", $process, $library, $workPath, $libPath, $actualPackage);
+              foreach $cell (@{ $cellList{$package} }) {
+                printf(" -c %s", $cell);
+              }
+              printf("\n");
+              printf("if (\$status) then\n  exit(1)\nendif\n");
+              $flag{$base} = 1;
+            } else {
+              printf(STDERR "-E- Error: Multiple Pycell builds using the same code for package ($base)\n");
+              printf(STDERR "            This will cause an overwrite of the $base.zip file\n");
+              exit(1);
+            }
+          } else {
+            printf(STDERR "-E- Error: Unable to locate Python file at (lib/python/$package)\n");
+            exit(1);
+          }
+        }
+      }
+    }
+  }
+}
+
+#######################################################
+#       createPcell
+#######################################################
+sub createPcell {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $workPath, $libPath) = @_;
+  my ($root, $cell, $package, $actualPackage, $validPackage) = (undef) x 5;
+  my %cellList = ();
+
+  #foreach $package (@{$$buildConfigPtr{process}{$process}{build_packages}{pcell}}){
+  #    &getCells(\%{$$buildConfigPtr{process}{$process}{package_definitions}{$package}},\%cellList,$package);
+  #}
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{pcell} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "lib/pcell", "fdkPcell_", ".pc");
+          if (defined $actualPackage) {
+            $root = $actualPackage;
+            $root =~ s/.+\///g;
+            printf("%s/loadPcells.csh -p %s -l %s -workPath %s -libPath %s -package %s ", "../build_scripts", $process, $library, $workPath, $libPath, $actualPackage);
+            foreach $cell (@{ $cellList{$package} }) {
+              printf(" -c %s", $cell);
+            }
+            printf("\n");
+            printf("if (\$status) then\n  exit(1)\nendif\n");
+          } else {
+            printf(STDERR "-E- Error: Unable to locate Pcell file at (lib/pcell/$package)\n");
+            exit(1);
+          }
+        }
+      }
+    }
+  }
+}
+
+#######################################################
+#       createContext
+#######################################################
+sub createContext {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $techLibName, $workPath,     $libPath)       = @_;
+  my ($root,    $cell,    $package,       $contextPath,    $logPath,     $validPackage, $actualPackage) = (undef) x 7;
+  my %cellList = ();
+
+  $contextPath = "$libPath/$library/lib.cxt";
+
+  if (!-e $contextPath) {
+    mkpath($contextPath);
+  }
+
+  $logPath = "$workPath/contextLogs";
+  if (!-e $logPath) {
+    mkpath($logPath);
+  }
+
+  # build common context file only if we are building the tech library
+  if ($library eq $techLibName) {
+    printf("%s/buildContext.py -r -l %s -c %s/common  %s\n", "../build_scripts", $logPath, $contextPath, "../lib/skill/common");
+    printf("if (\$status) then\n  exit(1)\nendif\n");
+  }
+
+  # Now build context file for each package (cdf and pcells)
+  my %actualPackage_set;
+
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{pcell} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContent($package, "lib/pcell", "fdkPcell_", ".pc");
+          if (defined $actualPackage) {
+            $actualPackage_set{$actualPackage}++;
+          }
+        }
+      }
+    }
+  }
+  foreach my $actualPackage (keys %actualPackage_set) {
+    (my $target = $actualPackage) =~ s/\//_/g;
+    print <<__EOS__
+../build_scripts/buildContext.py -l "$logPath" -s .il -c "$contextPath/${target}Pcell" "./lib/pcell/$actualPackage"
+if (\$status != 0) then
+  exit 1
+endif
+__EOS__
+  }
+
+  # Get cdf callbacks
+  %actualPackage_set = ();
+
+  %cellList = ();
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{cdf} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContentDir($package, "lib.skill");
+          if (defined $actualPackage && &dirNotEmpty("lib.skill/" . $actualPackage) > 0) {
+            $actualPackage_set{$actualPackage}++;
+          }
+        }
+      }
+    }
+  }
+  foreach my $actualPackage (keys %actualPackage_set) {
+    ############################################################
+    #    Make sure the auto-genned CDF callback
+    #    SKILL routines are cleanly generated
+    ############################################################
+    (my $target = $actualPackage) =~ s/\//_/g;
+    print <<__EOS__
+if ( -r "$workPath/lib.skill/$actualPackage/Makefile" || -r "$workPath/lib.skill/$actualPackage/makefile" ) then
+  make -C "$workPath/lib.skill/$actualPackage" "clean_${process}" && make -C "$workPath/lib.skill/$actualPackage" "$process"
+  if (\$status != 0) then
+    exit 1
+  endif
+endif
+../build_scripts/buildContext.py -l "$logPath" -s .il -c "$contextPath/${target}CB" "$workPath/lib.skill/$actualPackage"
+if (\$status != 0) then
+  exit 1
+endif
+__EOS__
+
+  }
+
+}
+
+#######################################################
+#       createTcl
+#######################################################
+sub createTcl {
+  my ($process, $library, $singlePackage, $buildConfigPtr, $techLibName, $workPath, $libPath) = @_;
+  my ($root, $cell, $package, $logFile, $validPackage, $actualPackage) = (undef) x 6;
+  my %cellList = ();
+
+  #    ../build_scripts/buildTcl.csh -p 4 -l intel73prim -pack mos $FDK_FOSSIL/oalibs/prim/lib/tcl/mos
+
+  # build common tcl file only if we are building the tech library
+  if ($library eq $techLibName) {
+    $logFile = "$workPath/buildTcl_common.log";
+    printf("%s/buildTcl.csh -p %s -l %s -workPath %s -libPath %s -log %s  %s\n", "../build_scripts", $process, $library, $workPath, $libPath, $logFile, "../lib/tcl/common");
+    printf("if (\$status) then\n  exit(1)\nendif\n");
+  }
+
+  # Now build tcl files for each package (cdf and pcells)
+
+  %cellList = ();
+  &getAllCells($buildConfigPtr, \%cellList, $process);
+  foreach $package (keys %cellList) {
+    foreach $validPackage (@{ $$buildConfigPtr{process}{$process}{build_packages}{cdf} }) {
+      if ($package =~ /^$validPackage\// || $package eq $validPackage) {
+        if (!defined $singlePackage || $package eq $singlePackage || $package =~ /^$singlePackage\//) {
+          $actualPackage = &findContentDir($package, "lib/tcl");
+          if (defined $actualPackage) {
+            $root = $package;
+            $root =~ s/.+\///g;
+            $logFile = "$workPath/buildTcl_" . $root . ".log";
+            printf("%s/buildTcl.csh -p %s -l %s -workPath %s -libPath %s -log %s  %s\n", "../build_scripts", $process, $library, $workPath, $libPath, $logFile, "./lib/tcl/$actualPackage");
+            printf("if (\$status) then\n  exit(1)\nendif\n");
+          }
+        }
+      }
+    }
+  }
+
+}
+
+#######################################################
+#       getFlattenedCellList
+#######################################################
+sub getFlattenedCellList ($) {
+
+  my ($pkg_defs) = @_;
+
+  return () if !defined($pkg_defs);
+
+  if (ref($pkg_defs) eq 'HASH') {
+    my %results;
+    while (my ($k, $v) = each(%$pkg_defs)) {
+      map { $results{$_}++; } getFlattenedCellList($v);
+    }
+    return (keys %results);
+  }
+
+  if (ref($pkg_defs) eq 'ARRAY') {
+    my %results;
+    foreach my $elem (@$pkg_defs) {
+      map { $results{$_}++; } getFlattenedCellList($elem);
+    }
+    return (keys %results);
+  }
+
+  return ($pkg_defs);
+
+}
+
+#######################################################
+#       createPrune
+#######################################################
+sub createPrune ($$$$$$$) {
+
+  my ($process, $library, $singlePackage, $buildConfigPtr, $techFile, $workPath, $libPath) = @_;
+
+  return if defined($singlePackage) && ($singlePackage ne 'prune');
+
+  ### Set up for running pruning script
+  print <<__EOS__
+../build_scripts/pruneLib.sh -d "$libPath" -n "$library" -w "$workPath"
+if (\$status != 0) then
+  exit 1
+endif
+__EOS__
+
+}
+
+#######################################################
+#######################################################
+#                       MAIN
+#######################################################
+#######################################################
+
+my ($outfile, $yamlFile, $process, $action, $library, $status) = (undef) x 6;
+my ($context, $pack, $buildConfigPtr, $listActions, $testOnly, $item) = (undef) x 6;
+my ($getCells, $clean, $techFile, $onlyPcell, $onlyPycell, $prune) = (undef) x 6;
+my ($workPath, $libPath, $techPath) = (undef) x 3;
+my @cellList   = ();
+my %actionHash = ();
+
+$techFile   = "";
+$onlyPcell  = 0;
+$onlyPycell = 0;
+
+GetOptions(
+  "h" => sub { printf STDERR "%s\n", $help_message; exit 0; },
+  "v" => sub { printf STDERR "%s: %s\n", $Script, $VERSION; exit 0; },
+  "tech=s"     => \$techFile,
+  "pack=s"     => \$pack,
+  "p=s"        => \$process,
+  "libPath=s"  => \$libPath,
+  "workPath=s" => \$workPath,
+  "clean"      => \$clean,
+  "getcell"    => \$getCells,
+  "tcl"        => sub { $actionHash{tcl}++; },
+  "onlypcell"  => \$onlyPcell,
+  "onlypycell" => \$onlyPycell,
+  "context"    => \$context,
+  "test"       => \$testOnly,
+  "list"       => \$listActions,
+  "l=s"        => \$library,
+  "propbag"    => sub { $actionHash{propbag}++; },
+  "cdf"        => sub { $actionHash{cdf}++; },
+  "pycell"     => sub { $actionHash{pycell}++; },
+  "pcell"      => sub { $actionHash{pcell}++; },
+  "prune"      => sub { $actionHash{prune}++; },
+  "noprune"    => sub { delete $actionHash{prune}; },
+  "a=s"        => sub { my ($arg) = @_; $actionHash{$arg}++; },
+  "config=s"   => \$yamlFile,
+  "c=s"        => \@cellList,
+  "o=s"        => \$outfile
+  )
+  or do {
+  print STDERR "$help_message";
+  exit 0;
+  };
+$process = ("p" . $process) if ($process !~ m/^p/);
+
+if (defined $pack && $#cellList >= 0) {
+  if (!scalar(keys %actionHash)) {
+    printf(STDERR "-E- Error: Must Specify at least one action on the command line\n");
+    exit(1);
+  }
+  $buildConfigPtr = &createConfig($process, $pack, \%actionHash, \@cellList);
+} else {
+  $buildConfigPtr = YAML::LoadFile($yamlFile);
+}
+
+if (defined $getCells) {
+  &printCellList($buildConfigPtr, $process, $pack);
+  exit;
+}
+
+# If no actions were defined on command line, then execute all actions defined in config file
+if (!scalar(keys %actionHash)) {
+  foreach $action (keys %{ $$buildConfigPtr{process}{$process}{build_packages} }) {
+    if ($onlyPycell == 1 && ($action ne "pcell" && $action ne "context")) {
+      $actionHash{$action}++;
+    } elsif ($onlyPcell == 1 && ($action ne "pycell" && $action ne "tcl")) {
+      $actionHash{$action}++;
+    } elsif ($onlyPycell == 0 && $onlyPcell == 0) {
+      $actionHash{$action}++;
+    }
+  }
+  if ($onlyPycell == 1) {
+    $actionHash{tcl}++;
+  } elsif ($onlyPcell == 1) {
+    $context = 1;
+  } elsif ($onlyPycell == 0 && $onlyPcell == 0) {
+    $actionHash{tcl}++;
+    $context = 1;
+  }
+}
+
+if (!defined $workPath) {
+  $workPath = "$ENV{PWD}/build/work/$process/$CELLTYPE";
+}
+if (!defined $libPath) {
+  $libPath = "$ENV{PWD}/build/lib/$process/$CELLTYPE";
+}
+$techPath = "$ENV{FDK_INST_DIR}/oalibs/tech/latest/$ENV{FDK_OALIB_TYPE}/intel73tech";
+
+if (!-e $workPath || !-e "$libPath/$library") {
+  $actionHash{init}++;
+}
+if (defined $clean) {
+  system("/bin/rm -rf $libPath/$library\n");
+  system("/bin/rm -rf $workPath\n");
+  $actionHash{init}++;
+  $actionHash{categories}++;
+}
+
+if (!-e $workPath) {
+  mkpath($workPath);
+}
+
+if (!defined $outfile) {
+  $outfile = "$workPath/builder.script";
+}
+open(OUTFILE, ">$outfile") || die "Can't open:  $outfile";
+select(OUTFILE);
+
+if ($actionHash{pcell} || $context) {
+  $actionHash{context}++;
+}
+if ($actionHash{pycell}) {
+  $actionHash{tcl}++;
+}
+
+# If the user has used the -list option, then print out all possible actions as well
+# as actions that are currntly enabled in the config file
+if (defined $listActions) {
+  printf(STDERR "\n %s\n",              "_" x 43);
+  printf(STDERR "| %-12s  | %-25s |\n", " All Actions", "Available in config file");
+  printf(STDERR " %s\n",                "_" x 43);
+  foreach $action (@BUILD_ORDER) {
+    if ($actionHash{$action}) {
+      $status = "        X";
+    } else {
+      $status = "";
+    }
+    printf(STDERR "| %-12s  | %-25s |\n", $action, $status);
+  }
+  printf(STDERR " %s\n", "_" x 43);
+  exit;
+}
+
+# Loop through all actions in dependency order
+foreach $action (@BUILD_ORDER) {
+
+  #if action was define on command line
+  if ($actionHash{$action}) {
+    if ($action eq "cdf") {
+      &createCdf($process, $library, $pack, $buildConfigPtr, $workPath, $libPath);
+    } elsif ($action eq "propbag") {
+      &createPropbag($process, $library, $pack, $buildConfigPtr, $workPath, $libPath);
+    } elsif ($action eq "pycell") {
+      &createPycell($process, $library, $pack, $buildConfigPtr, $workPath, $libPath);
+      &createPycellSch($process, $library, $pack, $buildConfigPtr, $workPath, $libPath);
+    } elsif ($action eq "pcell") {
+      &createPcell($process, $library, $pack, $buildConfigPtr, $workPath, $libPath);
+    } elsif ($action eq "context") {
+      &createContext($process, $library, $pack, $buildConfigPtr, $techFile, $workPath, $libPath);
+    } elsif ($action eq "tcl") {
+      &createTcl($process, $library, $pack, $buildConfigPtr, $techFile, $workPath, $libPath);
+    } elsif ($action eq "prune") {
+      &createPrune($process, $library, $pack, $buildConfigPtr, $techFile, $workPath, $libPath);
+    } elsif ($action eq "init") {
+      &createInit($process, $library, $pack, $buildConfigPtr, $techFile, $workPath, $libPath, $techPath);
+    }
+  }
+}
+
+close OUTFILE if defined($outfile);
+
+# execute command file if -test arg did not exist
+printf(STDERR "source %s\n\n", $outfile);
+if (!defined $testOnly) {
+  system("/bin/csh", "-c", "source $outfile");
+} else {
+  system("/bin/csh", "-c", "cat $outfile");
+}

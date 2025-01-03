@@ -1,0 +1,316 @@
+#!/usr/intel/bin/perl -w
+
+#/******************************************************************************
+# *
+# * Program property of Intel Corporation
+# * (C) Copyright Intel Corporation, 2006
+# * All Rights Reserved
+# *
+# * This program is the property of Intel and is furnished pursuant to a written
+# * license agreement.  It may not be used, reproduced, or disclosed to others
+# * except in accordance with the terms and conditions of that agreement.
+# *
+# *****************************************************************************/
+#
+#/******************************************************************************
+# * Filename: macroPrestoFormatter
+# * Overview: Put inductor macro-models into the Presto format
+# * Date:     Q2, 2007
+# *****************************************************************************/
+
+use strict;
+use Getopt::Long;
+BEGIN { $SIG{'__WARN__'} = sub { die "ERROR: $_[0]"; }; }
+
+my %optctl;
+&GetOptions(\%optctl, 'help');
+
+if ($#ARGV != 4 || $optctl{"help"}) {
+  print <<EOF;
+Usage: macroPrestoFormatter [options] <topology (ckt)> <typical model>
+                                      <low model> <high model> <model name>
+
+This script reformats RIDE-output inductor models to conform to Presto needs.
+
+Options: [-help|-h]         This message
+EOF
+  exit(0);
+}
+
+my %opens = (
+  "L" => "cannot_open_for_all_frequencies",
+  "R" => 1.0E+07,
+  "C" => 1.0E-25
+);
+
+my %shorts = (
+  "L" => 1.0E-25,
+  "R" => 1.0E-06,
+  "C" => "cannot_short_for_all_frequencies"
+);
+
+my %trans = (
+  0 => "vss_special",
+  1 => "n",
+  2 => "p",
+  3 => "ct"
+);
+
+my $tag = $ARGV[4];
+
+my $header = "\nPost-formatted RIDE-generated inductor model: $tag\n";
+$header .= "Time stamp: ";
+$header .= `/bin/date`;
+$header .= `/usr/bin/md5sum $ARGV[1] $ARGV[2] $ARGV[3]`;
+$header =~ s/^/* /g;
+$header =~ s/\n/\n* /g;
+$header .= "\n";
+
+open CKT, "<$ARGV[0]" or die "Error: Cannot open $ARGV[0].\n";
+
+my %elms;
+
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    $elms{ $prm[0] } = [ $prm[1], $prm[2] ];
+  }
+}
+close CKT;
+
+my $twoPort = 1;
+
+# Typical circuit values
+my %typical;
+
+open CKT, "< $ARGV[1]" or die "Error: Cannot open $ARGV[1].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^\s*\.SUBCKT/)
+  {
+    my @prm = split;
+    $twoPort = 0 if ($#prm > 4); # Must be three-port
+  }
+  elsif (/^[CRLK]/)
+  {
+    my @prm = split;
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in typical circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+    }
+    $typical{ $prm[0] } = $prm[3];
+  }
+}
+close CKT;
+
+# Handle two-port
+if ($twoPort)
+{
+  delete $trans{3};
+}
+
+# Low-Q circuit values
+my %lowQ;
+
+open CKT, "< $ARGV[2]" or die "Error: Cannot open $ARGV[2].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in low-Q circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+    }
+    $lowQ{ $prm[0] } = $prm[3];
+  }
+}
+
+# High-Q circuit values
+my %highQ;
+
+open CKT, "< $ARGV[3]" or die "Error: Cannot open $ARGV[3].\n";
+while (<CKT>)
+{
+  $_ = uc;
+  if (/^[CRLK]/)
+  {
+    my @prm = split;
+    if ($prm[0] =~ /R(.*?)_SHORTED_BY_RIDE/)
+    {
+      print "-I- Handling $prm[0] in high-Q circuit.\n";
+      $prm[0] = $1;
+      $prm[3] = $shorts{ substr($1, 0, 1) };
+    }
+    $highQ{ $prm[0] } = $prm[3];
+  }
+}
+close CKT;
+
+# Complete with open items
+
+foreach my $elm (keys %elms)
+{
+  my $allThree = 1;
+
+  if (not defined $typical{ $elm })
+  {
+    print "-I- Handling open $elm in typical circuit.\n";
+    $typical{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if (not defined $lowQ{ $elm })
+  {
+    print "-I- Handling open $elm in low-Q circuit.\n";
+    $lowQ{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if (not defined $highQ{ $elm })
+  {
+    print "-I- Handling open $elm in high-Q circuit.\n";
+    $highQ{ $elm } = $opens{ substr($elm, 0, 1) };
+  }
+  else
+  {
+    $allThree = 0;
+  }
+
+  if ($allThree)
+  {
+    print "-I- $elm does not exist in all skews.\n";
+    delete $highQ{ $elm };
+    delete $lowQ{ $elm };
+    delete $typical{ $elm };
+  }
+}
+
+print "-I- Outputting $tag.sp.\n";
+open CKT, "> $tag.sp" or die "Error: Cannot open $tag.sp.\n";
+print CKT "$header";
+
+if ($twoPort)
+{
+  print CKT ".subckt $tag $trans{1} $trans{2}\n";
+}
+else
+{
+  print CKT ".subckt $tag $trans{3} $trans{1} $trans{2}\n";
+}
+# The flow no longer requires .param inside the circuit itself.
+#print CKT ".param shrink=1\n";
+#
+#print CKT ".param $tag\_skew = 0\n\n";
+#
+#foreach my $elm (keys %typical)
+#{
+#  print CKT ".param $tag\_$elm\t=\t$typical{ $elm }\n";
+#}
+print CKT "\n";
+
+foreach my $elm (keys %typical)
+{
+  my ($n0, $n1);
+  if (exists $trans{$elms{$elm}[0]})
+  {
+    $n0 = $trans{$elms{$elm}[0]};
+  }
+  elsif ($elm !~ /^K/)
+  {
+    $n0 = "n$elms{$elm}[0]";
+  }
+  else
+  {
+    $n0 = $elms{$elm}[0];
+  }
+
+  if (exists $trans{$elms{$elm}[1]})
+  {
+    $n1 = $trans{$elms{$elm}[1]};
+  }
+  elsif ($elm !~ /^K/)
+  {
+    $n1 = "n$elms{$elm}[1]";
+  }
+  else
+  {
+    $n1 = $elms{$elm}[1];
+  }
+
+  my $type = substr($elm, 0, 1);
+  print CKT "$elm\t$n0\t$n1\t$type=$tag\_$elm\n";
+  #print CKT "$elm\t$n0\t$n1\t$type=$elm\n";
+}
+print CKT "rdummy dummy dummy r=\'shrink*skew\'\n";
+print CKT "\n.ends\n";
+close CKT;
+
+print "-I- Outputting $tag\_procedure.tcl.\n";
+open CKT, "> $tag\_procedure.tcl"
+  or die "Error: Cannot open $tag\_procedure.tcl.\n";
+
+$header =~ s/\*/#/g;
+print CKT "$header";
+
+print CKT "proc induc_values_$tag { } {\n\n";
+print CKT "  global induc_skew_$tag , induc_var_$tag;\n\n";
+print CKT "  set induc_var_$tag {\n";
+
+
+foreach my $elm (keys %typical)
+{
+print CKT "      $tag\_$elm\n";
+}
+print CKT "      $tag\_skew\n";
+print CKT "  }\n\n";
+
+foreach my $elm(keys %typical)
+{
+print CKT "  set induc_skew_$tag(typ,$tag\_$elm)\t\"$typical{$elm}\"\n";
+}
+print CKT "  set induc_skew_$tag(typ,$tag\_skew)\t\"0\"\n\n";
+
+foreach my $elm(keys %lowQ)
+{
+print CKT "  set induc_skew_$tag(low,$tag\_$elm)\t\"$lowQ{$elm}\"\n";
+}
+print CKT "  set induc_skew_$tag(low,$tag\_skew)\t\"-1\"\n\n";
+
+foreach my $elm(keys %highQ)
+{
+print CKT "  set induc_skew_$tag(high,$tag\_$elm)\t\"$highQ{$elm}\"\n";
+}
+print CKT "  set induc_skew_$tag(high,$tag\_skew)\t\"1\"\n\n";
+
+print CKT "  return 1;\n";
+print CKT "}\n";
+close CKT;
+
+print "-I- Outputting $tag.csv.\n";
+open CSV, "> $tag.csv"
+  or die "-E- Cannot open $tag.csv.\n";
+
+print CSV "ParameterName,tttt,ffff,ssss\n\n"; 
+
+foreach my $elm(sort keys %typical) {
+  print CSV "$elm,$typical{$elm},$highQ{$elm},$lowQ{$elm}\n";
+}
+print CSV "skew,0,1,-1\n";
+print CSV "shrink,1,1,1\n";
+close CSV;
