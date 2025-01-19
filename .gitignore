@@ -7,6 +7,7 @@ __pycache__
 .venv
 *.egg-info
 testing_sandbox
+tools/*
 
 # Executables
 *.swf

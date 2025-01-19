@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock_guide"
+version = "1.0"
+authors = [{name="Mauricio Marulanda",email="jmarul1@gmail.com.com"}]
+description = ""
+readme = "README.md"
+keywords = ["stocks","predictions"]
+classifiers = [
+    "Framework :: Custom",
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.12"
+]
+dependencies = [
+    "attrs",
+    "click",
+    "daiquiri",
+    "keras",
+    "numpy",
+    "pandas",
+    "progress",
+    "scikit-learn"
+    "terminaltables",
+    "tensorflow",
+    "torch",
+    "yfinance",
+]
+requires-python = ">=3.12"
+
+
+[project.urls]
+Repository = "https://github.com/jmarul1/ReinforcementLearning.git"
+Issues = "https://github.com/jmarul1/ReinforcementLearning.git"
+
+[project.scripts]
+stock = "stk_guide.cli:cli"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-xdist",
+]
