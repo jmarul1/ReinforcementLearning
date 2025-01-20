@@ -14,8 +14,7 @@ class SequenceModel(Model):
 
     def train(self, features: DataFrame, labels: Series) -> None:
         self._features_types = DataType.get_type(features)
-        self._fit_preprocessors(features)
-        _features = self._preprocess(features)
+        _features = self.preprocessor(features)
         self._apimodel = Sequential()
         self._apimodel.add(LSTM(50, return_sequences=True, input_shape=(features.shape[1], 1)))
         self._apimodel.add(LSTM(50, return_sequences=False, input_shape=(features.shape[1], 1)))

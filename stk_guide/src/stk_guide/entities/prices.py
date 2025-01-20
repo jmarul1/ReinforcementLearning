@@ -1,10 +1,15 @@
 from datetime import datetime
+from enum import StrEnum, auto
 from numbers import Number
 from attrs import define
 from pandas import DataFrame
 
 
 PriceEntry = dict[str, float]
+
+
+class PricesEnum(StrEnum):
+    DATETIME = auto()
 
 
 class Prices(dict):
@@ -32,3 +37,6 @@ class Prices(dict):
 
     def to_frame(self) -> DataFrame:
         return DataFrame(self).transpose()
+
+    def features(self) -> DataFrame:
+        return self.to_frame().reset_index().rename({"index": PricesEnum.DATETIME.value}, axis=1)[[PricesEnum.DATETIME.value]]

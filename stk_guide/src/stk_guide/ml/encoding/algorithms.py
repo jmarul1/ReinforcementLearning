@@ -24,6 +24,10 @@ class CoderType:
         edata = self.api.transform(_data)
         return edata.squeeze().tolist()
 
+    def fit_code(self, data: list[NativeDataType]) -> list[float] | list[list[float]]:
+        self.fit(data)
+        return self.code(data)
+
     def clone_reset(self) -> Self:
         return ResetClone().clone_reset(self)
 

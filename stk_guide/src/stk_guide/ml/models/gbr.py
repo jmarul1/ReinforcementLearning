@@ -13,7 +13,7 @@ class GbrModel(Model):
 
     def train(self, features: DataFrame, labels: Series) -> None:
         self._features_types = DataType.get_type(features)
-        self._fit_preprocessors(features)
-        _features = self._preprocess(features)
+        _features = self.preprocessor(features)
         self._apimodel = GradientBoostingRegressor()
         self._apimodel.fit(_features, labels)
+        print(_features)

@@ -6,14 +6,11 @@ import pytest
 from stk_guide.ml.encoding.algorithms import DatetimeCoder, IdentityCoder, MinMaxCoder, OneHotCoder, OrdinalCoder
 from stk_guide.ml.encoding.encoder import Encoder
 from stk_guide.ml.models.model import Model
-from stk_guide.ml.models.sequence import SequenceModel
 
 
-def test_models(model_sample: Model, int_dataset: DataFrame, str_dataset: DataFrame) -> None:
-    features = concat([int_dataset.Features, str_dataset.Features], axis=1)
-    features.columns = ["x1", "x2", "x3", "x4"]
-    model_sample.train(features, int_dataset.Labels)
-    test = DataFrame([[10, 15, "a", "b"], [25, 25, "b", "c"]], columns=features.columns)
+def test_models(model_sample: Model, mix_dataset: DataFrame) -> None:
+    model_sample.train(mix_dataset.Features, mix_dataset.Labels)
+    test = DataFrame([["a", "b", 10, 15], ["b", "c", 20, 25]], columns=mix_dataset.Features.columns)
     preds = model_sample.predict(test)
     assert isinstance(preds, Series)
     assert len(preds) == 2
@@ -48,23 +45,23 @@ def test_encoding(datasets: DataFrame) -> None:
     edata = encoder(datasets.Features)
     assert isinstance(edata, DataFrame)
     assert len(edata) == len(datasets)
-    with pytest.raises(ValueError, match="No coder found for"):
+    with pytest.raises(ValueError, match="No encoder instructions for"):
         encoder(DataFrame({"nothing": [1, 2, 3, 4]}))
+    with pytest.raises(UnboundLocalError, match="Encoder.fit must be called before"):
+        Encoder()(datasets.Features)
 
 
-def test_custom_encoding(str_dataset: DataFrame) -> None:
-    encoder = Encoder(custom_encoding={"i1": OrdinalCoder()})
-    encoder.fit(str_dataset.Features)
-    edata = encoder(str_dataset.Features)
+def test_cst_feature_encoding(mix_dataset: DataFrame) -> None:
+    encoder = Encoder(feature_encoders={"x1": OrdinalCoder()})
+    encoder.fit(mix_dataset.Features)
+    edata = encoder(mix_dataset.Features)
     assert isinstance(edata, DataFrame)
-    assert len(edata) == len(str_dataset)
+    assert len(edata) == len(mix_dataset)
 
 
-def test_mix_encoding(str_dataset: DataFrame, int_dataset: DataFrame) -> None:
-    encoder = Encoder(custom_encoding={"x1": OrdinalCoder()})
-    data = concat([str_dataset.Features, int_dataset.Features], axis=1)
-    data.columns = ["x1", "x2", "x3", "x4"]
-    encoder.fit(data)
-    edata = encoder(data)
+def test_cst_scaler_encoding(mix_dataset: DataFrame) -> None:
+    encoder = Encoder(feature_scalers={"x1": MinMaxCoder()})
+    encoder.fit(mix_dataset)
+    edata = encoder(mix_dataset)
     assert isinstance(edata, DataFrame)
-    assert len(edata) == len(data)
+    assert len(edata) == len(mix_dataset)

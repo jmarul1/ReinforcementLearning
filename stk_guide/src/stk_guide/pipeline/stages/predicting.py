@@ -25,9 +25,8 @@ class Predictor(Stage):
 class PricePredictor(Predictor):
     @PrePostExecution.stage
     def __call__(self, context: Context, **kwargs: StageInputs.kwargs) -> None:
-        for stock, model in context.models.items():
-            prediction = Prediction(stock)
-            price_preds = model.predict(self._future_space)
-            for future_date, price_pred in zip(self._future_space.iloc[:, 0], price_preds):
-                prediction.prices[future_date] = {"Close": price_pred}
-            context.predictions.append(prediction)
+        prediction = Prediction(context.stock)
+        price_preds = context.model.predict(self._future_space)
+        for future_date, price_pred in zip(self._future_space.iloc[:, 0], price_preds):
+            prediction.prices[future_date] = {"Close": price_pred}
+        context.prediction = prediction

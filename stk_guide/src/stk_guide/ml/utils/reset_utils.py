@@ -9,7 +9,7 @@ class ResetDefaults(Enum):
 
 
 class ResetClone:
-    def clone_reset(self, inst: Any) -> Self:
+    def clone_reset(self, inst: Any, dont_resets: list[str] = None) -> Self:
         args, kwargs = [], {}
         sig = signature(inst.__class__)
         for arg_name, arg_value in sig.parameters.items():

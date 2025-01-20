@@ -1,9 +1,10 @@
-from attrs import define, field
+from attrs import define
 from pandas import DataFrame
-from .stage import Stage, StageInputs
+from ...entities.prices import PricesEnum
 from ..decorators import PrePostExecution
 from ..context import Context
 from ...ml.models.model import Model
+from .stage import Stage, StageInputs
 
 
 @define
@@ -21,10 +22,9 @@ class Trainer(Stage):
 class ClosePriceTrainer(Trainer):
     @PrePostExecution.stage
     def __call__(self, context: Context) -> None:
-        for stock in context.stocks:
-            model_inst = self.model.clone_reset()
-            labels = DataFrame(stock.prices).transpose().Close
-            _data = labels.reset_index().rename({"index": "datetime"}, axis=1)
-            features = _data.datetime.to_frame()
-            model_inst.train(features, labels)
-            context.models[stock] = model_inst
+        labels = DataFrame(context.stock.prices).transpose().Close
+        _data = labels.reset_index().rename({"index": PricesEnum.DATETIME.value}, axis=1)
+        features = _data.datetime.to_frame()
+        self.model.preprocessor = context.preprocessor
+        self.model.train(features, labels)
+        context.model = self.model

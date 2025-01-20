@@ -1,26 +1,24 @@
 from attrs import define, field
 from click import MissingParameter
 from .stage import Stage, StageInputs
+from ...ml.encoding.encoder import Encoder
 from ..decorators import PrePostExecution
 from ..context import Context
 
 
 @define
-class Collector(Stage):
+class Preprocessor(Stage):
+    encoder: Encoder = field(factory=Encoder)
+
     @PrePostExecution.stage
     def __call__(self, context: Context, **kwargs: StageInputs.kwargs) -> None:
         raise NotImplementedError
 
+    def _init(self, **kwargs: StageInputs.kwargs) -> None:
+        pass
 
-@define
-class PriceCollector(Collector):
-    _years_back: int | float = field(init=False)
 
+class PricePreprocessor(Preprocessor):
     @PrePostExecution.stage
     def __call__(self, context: Context, **kwargs: StageInputs.kwargs) -> None:
-        context.stock.populate_prices(self._years_back)
-
-    def _init(self, **kwargs: StageInputs.kwargs) -> None:
-        if "years_back" not in kwargs:
-            raise MissingParameter("years_back")
-        self._years_back = kwargs["years_back"]
+        context.preprocessor = self.encoder.fit(context.stock.prices.features())
