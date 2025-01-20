@@ -1,5 +1,5 @@
 # Build and Release Folders
-
+stk_guide/dist/*
 # Other files and folders
 .settings
 .vscode

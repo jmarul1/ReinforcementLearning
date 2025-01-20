@@ -10,7 +10,6 @@ description = ""
 readme = "README.md"
 keywords = ["stocks","predictions"]
 classifiers = [
-    "Framework :: Custom",
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3.12"
 ]
@@ -22,14 +21,13 @@ dependencies = [
     "numpy",
     "pandas",
     "progress",
-    "scikit-learn"
+    "scikit-learn",
     "terminaltables",
     "tensorflow",
     "torch",
     "yfinance",
 ]
 requires-python = ">=3.12"
-
 
 [project.urls]
 Repository = "https://github.com/jmarul1/ReinforcementLearning.git"

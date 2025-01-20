@@ -15,7 +15,7 @@ class HistoricPrice(Strategy):
     pipeline: Pipeline = field(init=False)
 
     def __call__(self, stocks: Stocks, years_back: int, days_fwd: int) -> list[Prediction]:
-        projections = DataFrame({"datetime": [datetime.now() + timedelta(days=iday) for iday in range(days_fwd)]})
+        projections = DataFrame({"datetime": [datetime.now().astimezone() + timedelta(days=iday) for iday in range(days_fwd)]})
         self.pipeline = Pipeline()
         self.pipeline.context.stocks = stocks
         self.pipeline.add(self.pipeline_stages.collector, years_back=years_back)

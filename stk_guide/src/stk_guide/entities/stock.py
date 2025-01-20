@@ -27,3 +27,6 @@ class Stock:
 
     def __hash__(self) -> int:
         return hash(self.symbol)
+
+    def __str__(self) -> str:
+        return self.symbol

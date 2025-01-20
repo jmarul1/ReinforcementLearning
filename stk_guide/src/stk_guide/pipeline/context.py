@@ -1,3 +1,5 @@
+from copy import deepcopy
+from typing import Self
 from attrs import define, field
 from ..ml.models.model import Model
 from ..entities.stocks import Stocks

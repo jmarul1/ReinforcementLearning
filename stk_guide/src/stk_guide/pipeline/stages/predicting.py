@@ -29,5 +29,5 @@ class PricePredictor(Predictor):
             prediction = Prediction(stock)
             price_preds = model.predict(self._future_space)
             for future_date, price_pred in zip(self._future_space.iloc[:, 0], price_preds):
-                prediction.prices[future_date] = {"close": price_pred}
+                prediction.prices[future_date] = {"Close": price_pred}
             context.predictions.append(prediction)
