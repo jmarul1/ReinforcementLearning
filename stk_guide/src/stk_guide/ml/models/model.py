@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from inspect import signature
+from pathlib import Path
 from typing import Self
 from attrs import asdict, define, field
 from pandas import DataFrame, Series, concat
@@ -19,7 +20,6 @@ class Model:
             raise ValueError("Predicting features shape/types must match that of training")
         _features = self.preprocessor(features)
         preds = self._apimodel.predict(_features)
-        print(_features)
         return Series(preds.squeeze().reshape(-1), name=str(self))
 
     def clone_reset(self) -> Self:
@@ -41,4 +41,8 @@ class Model:
 
     @abstractmethod
     def train(self, features: DataFrame, labels: Series) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save(self, prefix_path: str) -> bool:
         raise NotImplementedError

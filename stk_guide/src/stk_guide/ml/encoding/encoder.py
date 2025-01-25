@@ -10,7 +10,7 @@ from .algorithms import CoderType, IdentityCoder, DatetimeCoder, OneHotCoder, Or
 @define
 class Encoder:
     feature_encoders: dict[str, CoderType] = field(factory=dict)
-    feature_scalers: dict[str, CoderType] = field(factory=dict)
+    feature_scalers: dict[str, CoderType] | CoderType = field(factory=dict)
     _default_encoders: dict[CoderType, NativeDataType] = field(init=False)
     _fitted: bool = field(default=False, init=False)
 
@@ -27,10 +27,12 @@ class Encoder:
         for colname, values in data.items():
             edata = self.feature_encoders[colname].code(values)
             for _colname, _edata in self.expand_onehot(DataFrame({colname: edata})).items():
-                encoded_data[_colname] = self.feature_scalers[_colname].fit_code(_edata)
+                encoded_data[_colname] = self.feature_scalers[_colname].code(_edata)
         return DataFrame(encoded_data)
 
     def fit(self, data: DataFrame) -> Self:
+        if isinstance(self.feature_scalers, CoderType):
+            self.feature_scalers = {colname: self.feature_scalers.clone_reset() for colname in data}
         for colname, values in data.items():
             if colname not in self.feature_encoders:
                 self.feature_encoders[colname] = self.get_default(values)
@@ -50,7 +52,7 @@ class Encoder:
     def get_default(self, values: Series) -> CoderType:
         encoder = IdentityCoder
         for iencoder, ntype in self._default_encoders.items():
-            if isinstance(values[0], ntype):
+            if isinstance(values.iloc[0], ntype):
                 encoder = iencoder
                 break
         return encoder()

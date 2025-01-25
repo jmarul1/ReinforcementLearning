@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pandas import DataFrame, MultiIndex, concat
 import pytest
+from stk_guide.entities.options import Options
 from stk_guide.entities.stock import Stock
 from stk_guide.entities.stocks import Stocks
 from stk_guide.ml.encoding.encoder import Encoder
@@ -20,6 +21,12 @@ def stock_sample() -> Stock:
 @pytest.fixture
 def context_sample1(stock_sample: Stock) -> Context:  # pylint: disable = redefined-outer-name
     return Context(stock_sample)
+
+
+@pytest.fixture
+def options_sample(stock_sample: Stock) -> Options:  # pylint: disable = redefined-outer-name
+    stock_sample.populate_options(max_number=1)
+    return stock_sample.options
 
 
 @pytest.fixture

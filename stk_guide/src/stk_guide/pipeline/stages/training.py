@@ -28,3 +28,14 @@ class ClosePriceTrainer(Trainer):
         self.model.preprocessor = context.preprocessor
         self.model.train(features, labels)
         context.model = self.model
+
+
+class ClosePriceOptionsTrainer(Trainer):
+    @PrePostExecution.stage
+    def __call__(self, context: Context) -> None:
+        labels = DataFrame(context.stock.prices).transpose().Close
+        _data = labels.reset_index().rename({"index": PricesEnum.DATETIME.value}, axis=1)
+        features = _data.datetime.to_frame()
+        self.model.preprocessor = context.preprocessor
+        self.model.train(features, labels)
+        context.model = self.model

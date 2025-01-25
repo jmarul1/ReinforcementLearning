@@ -16,4 +16,6 @@ class GbrModel(Model):
         _features = self.preprocessor(features)
         self._apimodel = GradientBoostingRegressor()
         self._apimodel.fit(_features, labels)
-        print(_features)
+
+    def save(self, prefix_path: str) -> bool:
+        pass
