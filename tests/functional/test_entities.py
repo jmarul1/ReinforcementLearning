@@ -1,9 +1,11 @@
 from datetime import datetime
 from numbers import Number
+from typing import Literal
 from pandas import DataFrame
 import pytest
 from stk_guide.entities.options import Options
 from stk_guide.entities.prices import Prices
+from stk_guide.entities.rating import Rating
 from stk_guide.entities.stock import Stock
 from stk_guide.entities.stocks import Stocks
 
@@ -12,6 +14,8 @@ def test_stock() -> None:
     stock = Stock("AAPL", "Apple")
     assert stock.symbol == "AAPL"
     assert stock.prices is None
+    assert stock.options is None
+    assert isinstance(stock.info, dict)
 
 
 def test_stocks(stock_sample: Stock) -> None:
@@ -24,15 +28,13 @@ def test_stocks(stock_sample: Stock) -> None:
 
 
 def test_stock_price_dl(stock_sample: Stock) -> None:
-    stock_sample.populate_prices(years_back=0.1)
+    stock_sample.populate_prices(days_back=0.1)
     assert isinstance(stock_sample.prices, Prices)
 
 
 def test_stock_options_dl(stock_sample: Stock) -> None:
     stock_sample.populate_options()
     assert isinstance(stock_sample.options, Options)
-    assert isinstance(stock_sample.options.calls, DataFrame) and not stock_sample.options.calls.empty
-    assert isinstance(stock_sample.options.puts, DataFrame) and not stock_sample.options.puts.empty
 
 
 def test_prices() -> None:
@@ -53,11 +55,22 @@ def test_prices() -> None:
         Prices({date: {"Close": "111"}})
 
 
+def test_options() -> None:
+    calls = DataFrame({"bid": [0.5, 0.1]})
+    puts = DataFrame({"bid": [0.5, 0.1]})
+    test = Options(calls, puts)
+    assert isinstance(test.calls, DataFrame) and not test.calls.empty
+    assert isinstance(test.puts, DataFrame) and not test.puts.empty
+
+
 def test_options_summary(options_sample: Options) -> None:
     result = options_sample.sumarize_calls()
     assert isinstance(result, DataFrame)
     assert not result.empty
 
 
-def test_stock_info(stock_sample: Stock) -> None:
-    isinstance(stock_sample.ratings, dict)
+@pytest.mark.parametrize("ratings", ["robinhood_ratings", "finhub_ratings"])
+def test_stock_ratings(stock_sample: Stock, ratings: Literal["robinhood_ratings"] | Literal["finhub_ratings"]) -> None:
+    test = getattr(stock_sample, ratings)
+    assert isinstance(test, list)
+    assert isinstance(test[0], Rating)

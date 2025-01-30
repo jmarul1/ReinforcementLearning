@@ -10,7 +10,7 @@ NativeDataType = datetime | str | bool | Number
 class DataType:
     @staticmethod
     def get_type(test: NativeDataType | list | tuple | DataFrame | Series) -> NativeDataType | list[NativeDataType]:
-        return DataType()._get_type(test) # pylint: disable = protected-access
+        return DataType()._get_type(test)  # pylint: disable = protected-access
 
     def _findout(self, test: NativeDataType) -> NativeDataType:
         for check in [Number, str, bool, datetime]:
@@ -28,7 +28,7 @@ class DataType:
 
     @_get_type.register
     def _(self, test: DataFrame) -> list[NativeDataType]:
-        return [self._findout(itest) for itest in test.iloc[0,:]]
+        return [self._findout(itest) for itest in test.iloc[0, :]]
 
     @_get_type.register
     def _(self, test: list | tuple | Series) -> list[NativeDataType]:

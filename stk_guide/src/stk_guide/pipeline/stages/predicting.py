@@ -2,7 +2,6 @@ from attrs import define, field
 from click import MissingParameter
 from pandas import DataFrame
 from ...entities.prediction import Prediction
-from ...entities.prices import Prices
 from ..context import Context
 from ..decorators import PrePostExecution
 from .stage import Stage, StageInputs

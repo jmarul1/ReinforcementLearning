@@ -1,11 +1,8 @@
 from abc import abstractmethod
-from inspect import signature
-from pathlib import Path
 from typing import Self
-from attrs import asdict, define, field
-from pandas import DataFrame, Series, concat
+from attrs import define, field
+from pandas import DataFrame, Series
 from ..encoding.encoder import Encoder
-from ..encoding.algorithms import MinMaxCoder
 from ..utils.reset_utils import ResetClone
 from ..utils.data_utils import DataType, NativeDataType
 

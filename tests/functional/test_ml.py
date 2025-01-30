@@ -6,10 +6,11 @@ import pytest
 from stk_guide.ml.encoding.algorithms import DatetimeCoder, IdentityCoder, MinMaxCoder, OneHotCoder, OrdinalCoder
 from stk_guide.ml.encoding.encoder import Encoder
 from stk_guide.ml.models.model import Model
+from stk_guide.ml.scoring.scorer import RatingsScorer
 
 
 def test_models(model_sample: Model, mix_dataset: DataFrame) -> None:
-    model_sample.train(mix_dataset.Features, mix_dataset.Labels)
+    model_sample.train(mix_dataset.Features, mix_dataset.Labels.iloc[:, 0])
     test = DataFrame([["a", "b", 10, 15], ["b", "c", 20, 25]], columns=mix_dataset.Features.columns)
     preds = model_sample.predict(test)
     assert isinstance(preds, Series)
@@ -65,3 +66,10 @@ def test_cst_scaler_encoding(mix_dataset: DataFrame) -> None:
     edata = encoder(mix_dataset)
     assert isinstance(edata, DataFrame)
     assert len(edata) == len(mix_dataset)
+
+
+def test_scorer(ratings: DataFrame) -> None:
+    scr = RatingsScorer()
+    test = scr(ratings)
+    assert isinstance(test, Series)
+    assert len(test) == 2

@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pandas import DataFrame, MultiIndex, concat
 import pytest
 from stk_guide.entities.options import Options
 from stk_guide.entities.stock import Stock
-from stk_guide.entities.stocks import Stocks
 from stk_guide.ml.encoding.encoder import Encoder
 from stk_guide.ml.models.gbr import GbrModel
 from stk_guide.ml.models.model import Model
@@ -103,3 +102,8 @@ def model_sample(request: pytest.FixtureRequest, encoder: Encoder) -> Model:  # 
     options = {"epochs": 1} if isinstance(request.param, SequenceModel) else {}
     options["preprocessor"] = encoder
     return request.param(**options)
+
+
+@pytest.fixture
+def ratings() -> DataFrame:
+    return DataFrame([[date.today(), 32, 15, 5], [date.today(), 30, 10, 10]], columns=["date", "buy", "hold", "sell"], index=["AAPL", "NVDA"])
