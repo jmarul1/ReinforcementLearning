@@ -42,13 +42,17 @@ class Options:
         iscores = Encoder(feature_scalers={name: MinMaxCoder() for name in keys}).fit_transform(_options_data.loc[:, keys])
         if OptionsEnum.IMPLIEDVOLATILITY in iscores:
             iscores[OptionsEnum.IMPLIEDVOLATILITY.value] = 1 - iscores[OptionsEnum.IMPLIEDVOLATILITY.value]
-        scores = (iscores * weights).prod(axis=1)
+        scores = (iscores * weights).sum(axis=1)
         for name, values in _options_data.items():
             if isinstance(values.iloc[0], Number):
                 _data[name] = mean(values)
             else:
                 _data[name] = values.iloc[0]
-        # _data[OptionsEnum.PROJECTED_PRICE_v0.value] = (options_data[OptionsEnum.STRIKE.value] * scores).sum() / scores.sum()
+        _data[OptionsEnum.PROJECTED_PRICE_v0.value] = (
+            ((options_data[OptionsEnum.STRIKE.value] + _options_data[OptionsEnum.ASK.value]) * scores).sum() / scores.sum()
+            if scores.sum() > 0
+            else 0
+        )
         strikes_scored = DataFrame(
             {
                 OptionsEnum.PROJECTED_PRICE_v1: _options_data[OptionsEnum.STRIKE.value] + _options_data[OptionsEnum.ASK.value],
@@ -61,12 +65,12 @@ class Options:
 
     def _keys_weights(self, weights: int | dict[str, int]) -> dict[str, int]:
         keys = [
-            # OptionsEnum.BID.value,
-            # OptionsEnum.ASK.value,
-            # OptionsEnum.OPENINTEREST.value,
+            OptionsEnum.BID.value,
+            OptionsEnum.ASK.value,
+            OptionsEnum.OPENINTEREST.value,
             OptionsEnum.VOLUME.value,
-            # OptionsEnum.IMPLIEDVOLATILITY.value,
-            # OptionsEnum.PERCENTCHANGE.value,
+            OptionsEnum.IMPLIEDVOLATILITY.value,
+            OptionsEnum.PERCENTCHANGE.value,
         ]
         if isinstance(weights, dict):
             for key in weights:
